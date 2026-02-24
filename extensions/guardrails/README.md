@@ -5,9 +5,12 @@ Adds:
 - blocks direct `gh pr merge` (forces `/squash-merge` readiness gate path)
 - post-edit fast feedback (`lint`/`typecheck`/`check` auto-detect)
 - PR metadata guardrails:
-  - blocks inline `gh pr create/edit --body/-b` (requires `--body-file/-F`)
+  - blocks inline GitHub write bodies (`gh pr|issue ... --body/-b`) and requires `--body-file/-F`
   - auto-lints and auto-fixes malformed PR title/body after successful PR create/edit
   - strips escaped newlines / log-noise artifacts from PR descriptions
+- repository scope guardrail:
+  - read/write/edit and `bash` commands that `cd` outside the current cwd require explicit confirmation
+  - approvals are remembered per external repo scope for the current session
 - local PR governance trend logging (`logs/pr-governance.ndjson`)
 
 Env:
@@ -16,6 +19,7 @@ Env:
 - `PI_PR_GOVERNANCE_AUTOFIX` (default `true`)
 - `PI_PR_LINT_TIMEOUT_MS` (default `120000`)
 - `PI_PR_TITLE_MAX_CHARS` (default `72`)
+- `PI_EXTERNAL_SCOPE_GUARD` (default `true`; set `false` to disable external-path confirmations)
 
 Commands:
 - `/guardrails` to view active config

@@ -1,13 +1,26 @@
 ---
-description: Prepare clean, shell-safe PR title/body from current git diff
+description: Prepare and publish a PR from current branch diff (not draft-only)
 ---
-Use current branch diff to produce:
+Use current branch diff to produce and **publish** a PR update:
 
 1. PR title (conventional, concise, <= 72 chars).
 2. Problem + solution summary.
 3. File-level change summary.
 4. Verification evidence (commands and outcomes).
 5. Risk / rollback notes.
+
+## Execution contract (non-negotiable)
+
+- When this prompt is invoked, do not stop at drafting text.
+- You must perform the GitHub write:
+  - If no PR exists for the branch: `gh pr create ... --body-file <path>`
+  - If a PR already exists: `gh pr edit ... --body-file <path>`
+- Only skip GitHub write if the user explicitly says "draft only" / "no write".
+
+## Repository scope (non-negotiable)
+
+- Assume PR work applies to the current working directory repository.
+- If you need to read/write/edit or run bash in another repository, ask for explicit confirmation first.
 
 ## Quality bar
 
@@ -22,6 +35,13 @@ Use current branch diff to produce:
 - Do not pass markdown body inline through a quoted `--body "..."` string.
 - Use `gh pr create/edit --body-file <path>`.
 - Preserve markdown backticks literally (no command substitution side effects).
+
+## GitHub CLI hygiene (non-negotiable)
+
+For any GitHub write operation (PR create/edit/comment, issue comment, review reply):
+1. Write markdown to a temp file.
+2. Use `--body-file/-F` (never `--body/-b`).
+3. Fetch back the posted content and confirm formatting quality.
 
 ## Post-create sanity check
 

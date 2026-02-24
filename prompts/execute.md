@@ -4,6 +4,10 @@ description: Execute requested work with focused scope and verification
 Task:
 $@
 
+Repository scope default (non-negotiable):
+- Assume work is for the current working directory repository.
+- If any read/write/edit/bash command needs a path outside current cwd, ask for confirmation first.
+
 Protocol:
 1. Restate objective and assumptions in 3 lines max.
 2. List behavior checklist before edits (happy path, edge cases, regressions).

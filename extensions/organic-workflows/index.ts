@@ -623,21 +623,19 @@ async function ensureQmdCollection(
   collection: string
 ): Promise<void> {
   const listed = await pi.exec("qmd", ["collection", "list"], { cwd, timeout: 60_000 });
-  const exists =
-    listed.code === 0 &&
-    listed.stdout
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .includes(collection);
+  const exists = listed.code === 0 && qmdCollectionExistsInList(listed.stdout, collection);
+
   if (!exists) {
     const add = await pi.exec("qmd", ["collection", "add", corpusDir, "--name", collection], {
       cwd,
       timeout: 120_000,
     });
     if (add.code !== 0) {
-      const summary = firstNonEmptyLine(add.stderr) ?? firstNonEmptyLine(add.stdout);
-      throw new Error(`Failed to add qmd collection ${collection}${summary ? ` (${summary})` : ""}`);
+      const combined = `${add.stderr}\n${add.stdout}`;
+      if (!/exists|already\s+exists|duplicate/i.test(combined)) {
+        const summary = firstNonEmptyLine(add.stderr) ?? firstNonEmptyLine(add.stdout);
+        throw new Error(`Failed to add qmd collection ${collection}${summary ? ` (${summary})` : ""}`);
+      }
     }
   }
 
@@ -651,6 +649,27 @@ async function ensureQmdCollection(
     const summary = firstNonEmptyLine(contextAdd.stderr) ?? firstNonEmptyLine(contextAdd.stdout);
     throw new Error(`Failed to add qmd context${summary ? ` (${summary})` : ""}`);
   }
+}
+
+function qmdCollectionExistsInList(stdout: string, collection: string): boolean {
+  const needle = collection.trim();
+  if (!needle) {
+    return false;
+  }
+
+  return stdout
+    .split("\n")
+    .map((line) => stripAnsi(line).trim())
+    .filter(Boolean)
+    .some((line) => {
+      if (line === needle) {
+        return true;
+      }
+      if (line.startsWith(`${needle} (`)) {
+        return true;
+      }
+      return line.includes(`qmd://${needle}`);
+    });
 }
 
 async function renderSessionAsMarkdown(sessionPath: string): Promise<string | null> {
