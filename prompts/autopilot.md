@@ -18,7 +18,7 @@ Codex-first pattern: draft fast (investigation, implementation, tests, docs), th
 
 ## Objective
 
-Deliver issue `$1` (or the highest-priority open issue when omitted) as a draft PR with verification evidence and `Closes #N`.
+Deliver the selected issue (explicit `issue-id` when provided, otherwise highest-priority open issue) as a draft PR with clean verification evidence and `Closes #N`.
 
 ## Priority Selection (Non-Negotiable)
 
@@ -39,10 +39,31 @@ Never skip an issue because it is under-specified. Make it ready:
 3. Create/refine spec
 4. Create/refine technical design
 
+## PR Hygiene Rules (Non-Negotiable)
+
+1. Never paste raw command stdout/stderr into PR title/body.
+2. Verification section must contain commands + concise pass/fail summaries only.
+3. Use `gh pr create/edit --body-file <file>` (not inline `--body "..."` with markdown backticks).
+4. After PR creation, fetch PR title/body and validate quality:
+   - no empty bullet points
+   - no escaped `\n` artifacts
+   - no unrelated runtime/test log lines
+5. If malformed, immediately repair with `gh pr edit`.
+
+## Review Triage Rules (Non-Negotiable)
+
+After opening the PR:
+1. Pull top-level + inline review comments.
+2. Triage critical/high findings first.
+3. For each critical/high item, either:
+   - fix in this PR, or
+   - explicitly respond why out of scope (citing issue boundaries / acceptance criteria) and create a follow-up issue when appropriate.
+4. Do not leave major concerns unacknowledged.
+
 ## Workflow
 
 1. **Find issue**
-   - If `$1` provided: `gh issue view $1 --json number,title,body,labels`
+   - If `issue-id` provided: `gh issue view <issue-id> --json number,title,body,labels,comments`
    - Else: `gh issue list --state open --limit 50`
    - Select by priority rules above
 2. **Load context**
@@ -50,9 +71,9 @@ Never skip an issue because it is under-specified. Make it ready:
    - Read `project.md` when present
    - If repo uses ownership signaling, assign/comment before implementation
 3. **Spec**
-   - If missing or weak, run `/spec $1` (or selected issue number)
+   - If missing or weak, run `/spec` for the selected issue
 4. **Design**
-   - If missing or weak, run `/architect $1` (or selected issue number)
+   - If missing or weak, run `/architect` for the selected issue
 5. **Build**
    - Run `/execute` in small, verified steps
 6. **Refine + verify**
@@ -60,10 +81,14 @@ Never skip an issue because it is under-specified. Make it ready:
    - Update docs where behavior changed
    - Run tests/lint/build; if failing, iterate with `/fix-ci`
 7. **Ship**
-   - Run `/pr`
+   - Run `/pr` to draft title/body/evidence
+   - Open/update PR with `--body-file`
    - Ensure PR body includes `Closes #N`
    - Post PR link/status back to issue
-8. **Retro note**
+8. **Review loop**
+   - Triage review comments (especially critical/high)
+   - Push fixes or post scoped responses + follow-up issue links
+9. **Retro note**
    - Record scope changes, blockers, and one reusable insight
 
 ## Stopping Conditions
@@ -85,4 +110,6 @@ Report:
 - Spec/design status
 - Key files changed
 - Verification results
-- PR URL and any follow-ups
+- PR URL
+- Review findings triaged (fixed vs deferred)
+- Follow-ups / retro insight
