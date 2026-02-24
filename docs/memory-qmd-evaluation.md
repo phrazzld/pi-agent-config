@@ -35,7 +35,7 @@ For our use case, this can index exported session-derived markdown + logs + docs
 Implemented in `extensions/organic-workflows`:
 - `memory_ingest` tool + `/memory-ingest` command
 - `memory_search` tool + `/memory-search` command
-- Session/log excerpt export to markdown corpus
+- Session/log excerpt export to Markdown corpus
 - QMD collection bootstrap + update flow
 
 ## Proposed next steps

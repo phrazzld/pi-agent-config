@@ -32,6 +32,7 @@ interface SquashMergeOptions {
   reflectionFocus: string;
   allowUnresolvedNits: boolean;
   allowQualityGateChanges: boolean;
+  keepBranch: boolean;
 }
 
 interface PullRequestMeta {
@@ -47,6 +48,7 @@ interface PullRequestMeta {
 interface PrCheck {
   name: string;
   state: string;
+  bucket?: string;
   link?: string;
 }
 
@@ -95,7 +97,7 @@ interface PrReadinessReport {
 }
 
 const MEMORY_MODE = StringEnum(["keyword", "semantic", "hybrid"] as const);
-const SEVERITY_KEYWORD = /\b(critical|high severity|sev[ -]?[01]|security|vulnerab|data loss|blocker|must fix|major issue)\b/i;
+const SEVERITY_KEYWORD = /\b(critical|high severity|sev[ -]?[01]|security|vulnerab\w*|data loss|blocker|must fix|major issue)\b/i;
 const ANSI_CSI_REGEX = new RegExp("\\u001b\\[[0-9;]*[A-Za-z]", "g");
 const ANSI_OSC_REGEX = new RegExp("\\u001b\\][^\\u0007]*\\u0007", "g");
 
@@ -106,7 +108,7 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
       const parsed = parseSquashMergeArgs(args);
       if (!parsed) {
         ctx.ui.notify(
-          "Usage: /squash-merge <pr-number> [reflection focus] [--allow-unresolved-nits] [--allow-quality-gate-changes]",
+          "Usage: /squash-merge <pr-number> [reflection focus] [--allow-unresolved-nits] [--allow-quality-gate-changes] [--keep-branch]",
           "warning"
         );
         return;
@@ -164,7 +166,12 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
 
       ctx.ui.setStatus("organic-workflows", `Squash-merging PR #${prNumber}...`);
 
-      const merge = await pi.exec("gh", ["pr", "merge", String(prNumber), "--squash", "--delete-branch"], {
+      const mergeArgs = ["pr", "merge", String(prNumber), "--squash"];
+      if (!parsed.keepBranch) {
+        mergeArgs.push("--delete-branch");
+      }
+
+      const merge = await pi.exec("gh", mergeArgs, {
         cwd,
         timeout: 180_000,
       });
@@ -256,12 +263,23 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
       if (autoIngest) {
         const stale = await isMemoryStale();
         if (stale) {
-          await ingestMemory(pi, ctx, {
-            sessionLimit: getDefaultSessionLimit(),
-            includeLogs: true,
-            embed: false,
-            force: false,
-          });
+          ctx.ui.setStatus("organic-workflows", "Auto-ingesting stale memory...");
+          try {
+            await ingestMemory(pi, ctx, {
+              sessionLimit: getDefaultSessionLimit(),
+              includeLogs: true,
+              embed: false,
+              force: false,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            ctx.ui.notify(
+              `Auto-ingest failed (${message}). Continuing with existing memory corpus.`,
+              "warning"
+            );
+          } finally {
+            ctx.ui.setStatus("organic-workflows", "");
+          }
         }
       }
 
@@ -349,8 +367,8 @@ async function ingestMemory(pi: ExtensionAPI, ctx: ExtensionContext, options: In
   await fs.mkdir(sessionsOut, { recursive: true });
   await fs.mkdir(logsOut, { recursive: true });
 
-  await clearMarkdownFiles(sessionsOut);
-  await clearMarkdownFiles(logsOut);
+  const expectedSessionFiles = new Set<string>();
+  const expectedLogFiles = new Set<string>();
 
   const sessionFiles = await listFilesRecursive(sessionsRoot, (file) => file.endsWith(".jsonl"));
   sessionFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
@@ -370,8 +388,10 @@ async function ingestMemory(pi: ExtensionAPI, ctx: ExtensionContext, options: In
       .replace(/[:/\\]+/g, "__")
       .replace(/\.+/g, "_")
       .slice(-180);
-    const outPath = path.join(sessionsOut, `${name}.md`);
+    const fileName = `${name}.md`;
+    const outPath = path.join(sessionsOut, fileName);
     await fs.writeFile(outPath, transcript, "utf8");
+    expectedSessionFiles.add(fileName);
     sessionFilesWritten++;
   }
 
@@ -387,12 +407,16 @@ async function ingestMemory(pi: ExtensionAPI, ctx: ExtensionContext, options: In
         continue;
       }
       const relative = path.relative(logsRoot, logFile.path) || path.basename(logFile.path);
-      const fileName = relative.replace(/[:/\\]+/g, "__").replace(/[^a-zA-Z0-9_.-]/g, "_");
-      const outPath = path.join(logsOut, `${fileName}.md`);
+      const fileName = `${relative.replace(/[:/\\]+/g, "__").replace(/[^a-zA-Z0-9_.-]/g, "_")}.md`;
+      const outPath = path.join(logsOut, fileName);
       await fs.writeFile(outPath, rendered, "utf8");
+      expectedLogFiles.add(fileName);
       logFilesWritten++;
     }
   }
+
+  await pruneMarkdownFiles(sessionsOut, expectedSessionFiles);
+  await pruneMarkdownFiles(logsOut, expectedLogFiles);
 
   const manifest = [
     "# Pi Memory Corpus",
@@ -518,7 +542,13 @@ async function ensureQmdCollection(
   collection: string
 ): Promise<void> {
   const listed = await pi.exec("qmd", ["collection", "list"], { cwd, timeout: 60_000 });
-  const exists = listed.code === 0 && listed.stdout.includes(collection);
+  const exists =
+    listed.code === 0 &&
+    listed.stdout
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .includes(collection);
   if (!exists) {
     const add = await pi.exec("qmd", ["collection", "add", corpusDir, "--name", collection], {
       cwd,
@@ -716,19 +746,20 @@ async function listFilesRecursive(
   return out;
 }
 
-async function clearMarkdownFiles(dir: string): Promise<void> {
+async function pruneMarkdownFiles(dir: string, keep: Set<string>): Promise<void> {
   if (!existsSync(dir)) {
     return;
   }
+
   const entries = await fs.readdir(dir, { withFileTypes: true });
   for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
+    if (entry.isDirectory() || !entry.name.endsWith(".md")) {
       continue;
     }
-    if (entry.name.endsWith(".md")) {
-      await fs.unlink(fullPath);
+    if (keep.has(entry.name)) {
+      continue;
     }
+    await fs.unlink(path.join(dir, entry.name));
   }
 }
 
@@ -819,7 +850,7 @@ async function assessPrReadiness(
     "checks",
     String(options.prNumber),
     "--json",
-    "name,state,link",
+    "name,state,bucket,link",
   ]);
 
   if (!checks) {
@@ -834,10 +865,27 @@ async function assessPrReadiness(
     }
   } else {
     const failing = checks.filter((check) => {
+      const bucket = check.bucket?.toLowerCase();
+      if (bucket) {
+        return bucket === "fail" || bucket === "cancel";
+      }
+
       const state = check.state.toUpperCase();
-      return state === "FAILURE" || state === "ERROR" || state === "CANCELLED" || state === "TIMED_OUT";
+      return (
+        state === "FAILURE" ||
+        state === "ERROR" ||
+        state === "CANCELLED" ||
+        state === "TIMED_OUT" ||
+        state === "ACTION_REQUIRED" ||
+        state === "STARTUP_FAILURE"
+      );
     });
     const pending = checks.filter((check) => {
+      const bucket = check.bucket?.toLowerCase();
+      if (bucket) {
+        return bucket === "pending";
+      }
+
       const state = check.state.toUpperCase();
       return state === "PENDING" || state === "IN_PROGRESS" || state === "QUEUED" || state === "WAITING";
     });
@@ -1046,20 +1094,23 @@ function detectQualityGateFindings(files: PrFile[]): string[] {
 
 function isQualityGateFile(filePath: string): boolean {
   const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  const base = path.posix.basename(normalized);
+
   return (
     normalized.startsWith(".github/workflows/") ||
     normalized === "package.json" ||
     normalized === "codecov.yml" ||
     normalized === ".codecov.yml" ||
     normalized === ".coveragerc" ||
-    normalized.includes("vitest.config") ||
-    normalized.includes("jest.config") ||
-    normalized.includes("eslint.config") ||
-    normalized.includes(".eslintrc") ||
-    normalized.includes("tsconfig") ||
-    normalized.includes("lefthook") ||
-    normalized.includes(".husky") ||
-    normalized.includes("commitlint")
+    /^vitest\.config(\.[^/]+)?$/.test(base) ||
+    /^jest\.config(\.[^/]+)?$/.test(base) ||
+    /^eslint\.config(\.[^/]+)?$/.test(base) ||
+    /^\.eslintrc(\.[^/]+)?$/.test(base) ||
+    /^tsconfig(\.[^/]+)?\.json$/.test(base) ||
+    /^lefthook(\.[^/]+)?$/.test(base) ||
+    normalized === ".husky" ||
+    normalized.includes("/.husky/") ||
+    /^commitlint(\.[^/]+)?$/.test(base)
   );
 }
 
@@ -1158,6 +1209,7 @@ function parseSquashMergeArgs(args: string): SquashMergeOptions | null {
     reflectionFocus: focusTokens.join(" ").trim(),
     allowUnresolvedNits: flags.has("--allow-unresolved-nits"),
     allowQualityGateChanges: flags.has("--allow-quality-gate-changes"),
+    keepBranch: flags.has("--keep-branch"),
   };
 }
 

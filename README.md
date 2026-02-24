@@ -20,6 +20,7 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 ## Included Skills
 - `skills/web-search`: retrieval-first web research workflow and output contract
 - `skills/organic-reflection`: usage-driven codification and tradeoff-scored improvement planning
+- `skills/pr-feedback`: GH CLI-first PR feedback triage, fix/commit loop, and reviewer reply templates
 
 ## Included Workflow Prompts
 - `/execute`
