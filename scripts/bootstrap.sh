@@ -3,7 +3,7 @@ set -euo pipefail
 
 RUNTIME_DIR="${PI_RUNTIME_DIR:-$HOME/.pi/agent}"
 CONFIG_DIR="${PI_CONFIG_DIR:-$HOME/Development/pi-agent-config}"
-ASSETS=(skills extensions prompts themes)
+ASSETS=(skills extensions agents prompts themes)
 
 mkdir -p "$RUNTIME_DIR"
 

@@ -2,20 +2,24 @@
 
 Versioned config for PI agent runtime (`~/.pi/agent`).
 
+> Source-of-truth policy: this repository is the active runtime authority. Legacy configs in `~/.codex` and `~/.claude` are reference material only.
+
 ## Layout
 - `settings.json`: versioned runtime settings
 - `skills/`: local skills (symlinked into runtime)
 - `extensions/`: local extensions (symlinked into runtime)
+- `agents/`: subagent definitions (symlinked into runtime)
 - `prompts/`: prompt templates (symlinked into runtime)
 - `themes/`: themes (symlinked into runtime)
 - `docs/`: provider docs and policy
-- `scripts/`: bootstrap/sync scripts
+- `scripts/`: bootstrap/sync scripts and test helpers
 
 ## Included Runtime Extensions
 - `extensions/web-search`: `web_search` tool + `/web*` commands
 - `extensions/guardrails`: irreversible-command blocks + post-edit checks + PR metadata lint/fix + governance trend logging
 - `extensions/profiles`: `/profile` modes (`ultrathink`, `execute`, `ship`, `fast`)
 - `extensions/organic-workflows`: code-enforced `/squash-merge` + high/critical review finding merge gate + local-first QMD memory ingest/search
+- `extensions/subagent`: `subagent` delegation tool (single, parallel, chain) with user/project agent scopes
 
 ## Included Skills
 - `skills/web-search`: retrieval-first web research workflow and output contract
@@ -40,6 +44,10 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `/pr-lint`
 - `/pr-trends`
 - `/review-policy`
+
+## Included Delegation Tooling
+- `subagent` tool (from `extensions/subagent`)
+- default agent profiles in `agents/` (`scout`, `planner`, `worker`, `reviewer`)
 
 ## Setup
 ```bash
@@ -67,6 +75,13 @@ Optional local-memory knobs (QMD prototype):
 - `PI_MEMORY_SESSION_LIMIT`
 - `PI_MEMORY_MAX_CHARS_PER_SESSION`
 - `PI_MEMORY_SYNC_TTL_MS`
+
+## Extension Tests (lightweight harness)
+```bash
+./scripts/test-extensions.sh
+```
+
+See `docs/pi-extension-testing.md` for testing guidelines.
 
 ## Settings Sync
 ```bash
