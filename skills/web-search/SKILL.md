@@ -1,3 +1,8 @@
+---
+name: web-search
+description: Retrieval-first web research with citations and recency controls. Use for web, docs, and news lookups via /web, /web-deep, /web-news, and /web-docs.
+---
+
 # Web Search Skill
 
 Provides retrieval-first web research with citations and recency controls.
