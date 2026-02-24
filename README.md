@@ -13,9 +13,9 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 
 ## Included Runtime Extensions
 - `extensions/web-search`: `web_search` tool + `/web*` commands
-- `extensions/guardrails`: irreversible-command blocks + post-edit checks
+- `extensions/guardrails`: irreversible-command blocks + post-edit checks + PR metadata lint/fix + governance trend logging
 - `extensions/profiles`: `/profile` modes (`ultrathink`, `execute`, `ship`, `fast`)
-- `extensions/organic-workflows`: code-enforced `/squash-merge` + local-first QMD memory ingest/search
+- `extensions/organic-workflows`: code-enforced `/squash-merge` + high/critical review finding merge gate + local-first QMD memory ingest/search
 
 ## Included Skills
 - `skills/web-search`: retrieval-first web research workflow and output contract
@@ -37,6 +37,9 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `/squash-merge`
 - `/memory-ingest`
 - `/memory-search`
+- `/pr-lint`
+- `/pr-trends`
+- `/review-policy`
 
 ## Setup
 ```bash
@@ -50,7 +53,7 @@ Optional (QMD local-memory prototype):
 ```
 
 ## Required Env
-See `.env.example` and `docs/provider-config.md`.
+See `.env.example`, `docs/provider-config.md`, `docs/pr-governance.md`, and `docs/reviewer-policy-matrix.md`.
 
 Core retrieval keys:
 - `CONTEXT7_API_KEY` (docs)

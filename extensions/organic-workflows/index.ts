@@ -7,6 +7,15 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
+import { appendPrGovernanceEvent } from "../shared/pr-governance-log";
+import {
+  classifyReviewSeverity,
+  isActionableReviewFinding,
+  isBotAuthor,
+  isHardBlockingFinding,
+} from "../shared/reviewer-policy";
+import type { ReviewSeverity } from "../shared/reviewer-policy";
+
 type MemoryMode = "keyword" | "semantic" | "hybrid";
 
 interface IngestOptions {
@@ -32,6 +41,7 @@ interface SquashMergeOptions {
   reflectionFocus: string;
   allowUnresolvedNits: boolean;
   allowQualityGateChanges: boolean;
+  allowCriticalBotFindings: boolean;
   keepBranch: boolean;
 }
 
@@ -40,6 +50,7 @@ interface ParsedSquashMergeArgs {
   reflectionFocus: string;
   allowUnresolvedNits: boolean;
   allowQualityGateChanges: boolean;
+  allowCriticalBotFindings: boolean;
   keepBranch: boolean;
 }
 
@@ -98,14 +109,34 @@ interface ReviewThreadsResponse {
   };
 }
 
+interface GitHubComment {
+  id: number;
+  body?: string;
+  html_url?: string;
+  user?: {
+    login?: string;
+    type?: string;
+  };
+}
+
+interface BotReviewFinding {
+  id: number;
+  source: "issue_comment" | "review_comment";
+  author: string;
+  severity: ReviewSeverity;
+  actionable: boolean;
+  url: string;
+  summary: string;
+}
+
 interface PrReadinessReport {
   meta: PullRequestMeta | null;
   blockers: string[];
   warnings: string[];
+  botFindings: BotReviewFinding[];
 }
 
 const MEMORY_MODE = StringEnum(["keyword", "semantic", "hybrid"] as const);
-const SEVERITY_KEYWORD = /\b(critical|high severity|sev[ -]?[01]|security|vulnerab\w*|data loss|blocker|must fix|major issue)\b/i;
 const ANSI_CSI_REGEX = new RegExp("\\u001b\\[[0-9;]*[A-Za-z]", "g");
 const ANSI_OSC_REGEX = new RegExp("\\u001b\\][^\\u0007]*\\u0007", "g");
 
@@ -119,7 +150,7 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
       const prNumber = parsed.prNumber ?? (await detectCurrentBranchPrNumber(pi, cwd));
       if (!prNumber) {
         ctx.ui.notify(
-          "Unable to infer a pull request for the current branch. Usage: /squash-merge [pr-number] [reflection focus] [--allow-unresolved-nits] [--allow-quality-gate-changes] [--keep-branch]",
+          "Unable to infer a pull request for the current branch. Usage: /squash-merge [pr-number] [reflection focus] [--allow-unresolved-nits] [--allow-quality-gate-changes] [--allow-critical-bot-findings] [--keep-branch]",
           "warning"
         );
         return;
@@ -130,6 +161,7 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
         reflectionFocus: parsed.reflectionFocus,
         allowUnresolvedNits: parsed.allowUnresolvedNits,
         allowQualityGateChanges: parsed.allowQualityGateChanges,
+        allowCriticalBotFindings: parsed.allowCriticalBotFindings,
         keepBranch: parsed.keepBranch,
       };
       const { reflectionFocus } = options;
@@ -145,9 +177,41 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
 
       const readiness = await assessPrReadiness(pi, ctx, options);
       if (!readiness.meta) {
+        await appendPrGovernanceEvent({
+          ts: Date.now(),
+          kind: "review_gate",
+          status: "error",
+          prNumber,
+          details: {
+            blockers: ["failed-to-load-pr-metadata"],
+          },
+        });
         ctx.ui.notify(`Failed to load PR #${prNumber}.`, "error");
         return;
       }
+
+      await appendPrGovernanceEvent({
+        ts: Date.now(),
+        kind: "review_gate",
+        status:
+          readiness.blockers.length > 0
+            ? "block"
+            : readiness.warnings.length > 0
+              ? "warn"
+              : "pass",
+        repo: repoFromPullRequestUrl(readiness.meta.url),
+        prNumber,
+        details: {
+          blockers: readiness.blockers,
+          warnings: readiness.warnings,
+          botFindings: readiness.botFindings.map((finding) => ({
+            severity: finding.severity,
+            actionable: finding.actionable,
+            source: finding.source,
+            url: finding.url,
+          })),
+        },
+      });
 
       if (readiness.blockers.length > 0) {
         ctx.ui.notify(
@@ -845,6 +909,7 @@ async function assessPrReadiness(
 ): Promise<PrReadinessReport> {
   const blockers: string[] = [];
   const warnings: string[] = [];
+  const botFindings: BotReviewFinding[] = [];
 
   const meta = await ghJson<PullRequestMeta>(pi, ctx.cwd, [
     "pr",
@@ -855,7 +920,12 @@ async function assessPrReadiness(
   ]);
 
   if (!meta) {
-    return { meta: null, blockers: ["Unable to load pull request metadata."], warnings };
+    return {
+      meta: null,
+      blockers: ["Unable to load pull request metadata."],
+      warnings,
+      botFindings,
+    };
   }
 
   if (meta.state !== "OPEN") {
@@ -965,6 +1035,34 @@ async function assessPrReadiness(
       warnings.push("Could not inspect review threads via GraphQL.");
     }
 
+    const scannedBotFindings = await fetchBotReviewFindings(pi, ctx.cwd, repo, options.prNumber);
+    if (!scannedBotFindings) {
+      warnings.push("Could not inspect bot review comments for severity policy checks.");
+    } else {
+      botFindings.push(...scannedBotFindings);
+
+      const blockingBotFindings = scannedBotFindings.filter((finding) =>
+        isHardBlockingFinding("bot", finding.severity, finding.actionable)
+      );
+
+      if (blockingBotFindings.length > 0) {
+        const sample = blockingBotFindings
+          .slice(0, 3)
+          .map((finding) => `${finding.severity.toUpperCase()} ${finding.summary}`)
+          .join("; ");
+
+        if (options.allowCriticalBotFindings) {
+          warnings.push(
+            `Blocking bot findings present (allowed by --allow-critical-bot-findings): ${sample}`
+          );
+        } else {
+          blockers.push(
+            `Blocking bot findings (critical/high) must be fixed before merge: ${sample}`
+          );
+        }
+      }
+    }
+
     const files = await ghJson<PrFile[]>(pi, ctx.cwd, [
       "api",
       `repos/${repo.owner}/${repo.name}/pulls/${options.prNumber}/files?per_page=100`,
@@ -992,7 +1090,7 @@ async function assessPrReadiness(
     }
   }
 
-  return { meta, blockers, warnings };
+  return { meta, blockers, warnings, botFindings };
 }
 
 async function getRepoIdentity(pi: ExtensionAPI, cwd: string): Promise<RepoIdentity | null> {
@@ -1072,6 +1170,85 @@ async function fetchReviewThreads(
   }
 }
 
+async function fetchBotReviewFindings(
+  pi: ExtensionAPI,
+  cwd: string,
+  repo: RepoIdentity,
+  prNumber: number
+): Promise<BotReviewFinding[] | null> {
+  const issueComments = await ghJson<GitHubComment[]>(pi, cwd, [
+    "api",
+    `repos/${repo.owner}/${repo.name}/issues/${prNumber}/comments?per_page=100`,
+  ]);
+
+  const reviewComments = await ghJson<GitHubComment[]>(pi, cwd, [
+    "api",
+    `repos/${repo.owner}/${repo.name}/pulls/${prNumber}/comments?per_page=100`,
+  ]);
+
+  if (!issueComments && !reviewComments) {
+    return null;
+  }
+
+  const findings: BotReviewFinding[] = [];
+  if (issueComments) {
+    findings.push(...collectBotFindings(issueComments, "issue_comment"));
+  }
+  if (reviewComments) {
+    findings.push(...collectBotFindings(reviewComments, "review_comment"));
+  }
+
+  return findings;
+}
+
+function collectBotFindings(
+  comments: GitHubComment[],
+  source: BotReviewFinding["source"]
+): BotReviewFinding[] {
+  const findings: BotReviewFinding[] = [];
+
+  for (const comment of comments) {
+    const login = comment.user?.login ?? "";
+    const type = comment.user?.type ?? "";
+    if (!isBotAuthor(login, type)) {
+      continue;
+    }
+
+    const body = comment.body ?? "";
+    const severity = classifyReviewSeverity(body);
+    if (severity === "none") {
+      continue;
+    }
+
+    findings.push({
+      id: comment.id,
+      source,
+      author: login || "unknown-bot",
+      severity,
+      actionable: isActionableReviewFinding(body),
+      url: comment.html_url ?? "",
+      summary: summarizeFinding(body),
+    });
+  }
+
+  return findings;
+}
+
+function summarizeFinding(body: string): string {
+  const line = body
+    .split("\n")
+    .map((value) => value.trim())
+    .find((value) =>
+      Boolean(value) && !value.startsWith("!") && !value.startsWith("<")
+    );
+
+  const normalized = line ? line.replace(/`/g, "").trim() : "bot finding";
+  if (normalized.length <= 120) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 117).trimEnd()}...`;
+}
+
 function threadSummary(thread: ReviewThread): string {
   const comments = thread.comments?.nodes ?? [];
   const bodies = comments
@@ -1082,7 +1259,8 @@ function threadSummary(thread: ReviewThread): string {
 }
 
 function hasSeveritySignal(text: string): boolean {
-  return SEVERITY_KEYWORD.test(text);
+  const severity = classifyReviewSeverity(text);
+  return isHardBlockingFinding("human", severity, isActionableReviewFinding(text));
 }
 
 function detectQualityGateFindings(files: PrFile[]): string[] {
@@ -1214,6 +1392,7 @@ function parseSquashMergeArgs(args: string): ParsedSquashMergeArgs {
       reflectionFocus: "",
       allowUnresolvedNits: false,
       allowQualityGateChanges: false,
+      allowCriticalBotFindings: false,
       keepBranch: false,
     };
   }
@@ -1245,6 +1424,7 @@ function parseSquashMergeArgs(args: string): ParsedSquashMergeArgs {
     reflectionFocus: focusTokens.join(" ").trim(),
     allowUnresolvedNits: flags.has("--allow-unresolved-nits"),
     allowQualityGateChanges: flags.has("--allow-quality-gate-changes"),
+    allowCriticalBotFindings: flags.has("--allow-critical-bot-findings"),
     keepBranch: flags.has("--keep-branch"),
   };
 }
@@ -1296,6 +1476,15 @@ function getMaxCharsPerSession(): number {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.floor(value)));
+}
+
+function repoFromPullRequestUrl(url: string): string | undefined {
+  const match = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\//i);
+  if (!match) {
+    return undefined;
+  }
+
+  return `${match[1]}/${match[2]}`;
 }
 
 function firstNonEmptyLine(text: string): string | null {

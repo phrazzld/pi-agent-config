@@ -28,4 +28,5 @@ Use current branch diff to produce:
 After creating/updating PR:
 1. Fetch the PR title/body.
 2. Confirm there are no empty bullets, `\\n` artifacts, or unrelated command output.
-3. If malformed, immediately rewrite with `gh pr edit --body-file <path>`.
+3. Run `/pr-lint` (guardrails extension) for code-enforced metadata lint/fix.
+4. If malformed, immediately rewrite with `gh pr edit --body-file <path>`.

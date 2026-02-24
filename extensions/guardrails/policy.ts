@@ -46,6 +46,12 @@ const RULES: GuardrailRule[] = [
     pattern: /\bgit\s+commit\b[^\n]*\s--amend(\s|$)/i,
     reason: "Blocked: `git commit --amend` rewrites commit history.",
   },
+  {
+    name: "gh-pr-merge",
+    pattern: /\bgh\s+pr\s+merge\b/i,
+    reason:
+      "Blocked: use `/squash-merge` so readiness checks enforce critical/high review gates before merge.",
+  },
 ];
 
 export function evaluateCommandSafety(command: string): GuardrailDecision {

@@ -8,6 +8,7 @@ Opinionated workflow automation for:
      - PR open + not draft + merge-ready status
      - CI/CD checks all green (no pending/failing)
      - unresolved severe review threads block merge
+     - **critical/high actionable bot findings block merge by default**
      - suspicious quality-gate weakening patterns block merge
    - performs squash merge
    - switches/pulls default branch
@@ -25,6 +26,7 @@ Use sparingly and only after explicit manual review:
 
 - `--allow-unresolved-nits`
 - `--allow-quality-gate-changes`
+- `--allow-critical-bot-findings`
 
 ## QMD prerequisite
 

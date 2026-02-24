@@ -55,10 +55,11 @@ Never skip an issue because it is under-specified. Make it ready:
 After opening the PR:
 1. Pull top-level + inline review comments.
 2. Triage critical/high findings first.
-3. For each critical/high item, either:
-   - fix in this PR, or
-   - explicitly respond why out of scope (citing issue boundaries / acceptance criteria) and create a follow-up issue when appropriate.
-4. Do not leave major concerns unacknowledged.
+3. Critical/high findings are hard-blocking by default:
+   - fix in this PR before ship/merge, or
+   - only defer with explicit blocker rationale (dependency, missing access, or product decision) plus follow-up issue.
+4. Medium findings: fix now or track with rationale.
+5. Do not leave major concerns unacknowledged.
 
 ## Workflow
 
@@ -83,6 +84,7 @@ After opening the PR:
 7. **Ship**
    - Run `/pr` to draft title/body/evidence
    - Open/update PR with `--body-file`
+   - Run `/pr-lint` to enforce metadata quality guardrails
    - Ensure PR body includes `Closes #N`
    - Post PR link/status back to issue
 8. **Review loop**
