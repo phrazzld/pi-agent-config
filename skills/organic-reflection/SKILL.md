@@ -1,18 +1,25 @@
 ---
 name: organic-reflection
-description: Reflect on recent work and propose lean, high-leverage Pi improvements with tradeoff analysis. Use when evolving prompts/skills/extensions organically instead of bulk migration.
+description: Reflect on recent work and propose lean, high-leverage Pi/process improvements with tradeoff analysis. Use when evolving prompts/skills/extensions/tools organically instead of bulk migration.
 ---
 
 # Organic Reflection Skill
 
-Use this skill when the user wants Pi config to evolve from real usage signals.
+Use this skill when the user wants Pi/process/tooling to evolve from real usage signals.
 
 ## Core principles
 
 - No bulk migration.
 - No command/catalog bloat.
+- Minimize configuration, maximize opinionated defaults.
 - Prefer reversible changes.
 - Codify only repeated, high-value behavior.
+
+## Default scope
+
+Always evaluate both:
+1. Repo-local improvements
+2. Global Pi workflow/config improvements
 
 ## Inputs to gather
 
@@ -21,32 +28,31 @@ Use this skill when the user wants Pi config to evolve from real usage signals.
    - Recent issue/PR context
    - Notable friction points and repeated manual work
 
-2. **Config source context**
+2. **Memory evidence (local-first)**
+   - Session JSONL (`~/.pi/agent/sessions/...`)
+   - Runtime logs (`~/.pi/agent/logs/...`)
+   - If available, query local memory tools/index before broad research
+
+3. **Config source context**
    - Existing repo assets (`prompts/`, `skills/`, `extensions/`, `docs/`)
    - Legacy sources (`~/.claude/skills`, `~/.codex/commands`, `~/.codex/agents`)
 
-3. **Pi capability constraints**
+4. **Pi capability constraints**
    - Prompt templates, skills, extensions, packages
    - Session storage/branching/compaction behavior
-   - SDK and extension examples relevant to orchestration and memory
+   - SDK + extension examples relevant to orchestration and memory
 
-4. **External best practices**
-   - Use web/doc search for current recommendations
-   - Include citations for factual claims
+5. **External best practices**
+   - Web/doc research with citations
 
-## Optional parallel swarm (preferred when available)
+## Swarm-first research (recommended)
 
-If a `subagent` tool exists, run these lanes in parallel and synthesize.
-Reference templates: `references/swarm-lanes.md`
+If a `subagent` tool is available, propose a parallel swarm plan first.
+Reference lane templates: `references/swarm-lanes.md`.
 
-1. **Work-memory lane**
-   - Mine recent sessions/logs/commits for repeated pain
-2. **Legacy-config lane**
-   - Inspect Claude/Codex assets for reusable patterns
-3. **Pi-capability lane**
-   - Inspect Pi docs/examples for native extension points
-4. **External research lane**
-   - Gather current best practices + comparable memory/orchestration tools
+Important:
+- Swarm is recommended, not mandatory.
+- User chooses whether to launch swarm, number of agents, and lane focus.
 
 If no subagent support is available, run lanes sequentially.
 
@@ -58,7 +64,7 @@ If no subagent support is available, run lanes sequentially.
 
 2. **Identify codification targets**
    - Convert repeated patterns into candidate artifacts across these classes:
-     - Process-only improvement (no new artifact)
+     - Process-only improvement
      - Global Pi config update (prompt/skill/extension/package)
      - Repo-local config update
      - External tool adoption or internal tool build
@@ -67,28 +73,28 @@ If no subagent support is available, run lanes sequentially.
    - Load and apply: `references/evaluation-rubric.md`
 
 4. **Memory strategy analysis**
-   - Determine whether local-first memory is sufficient now.
-   - Compare options (session-index only, local semantic index, external memory layer).
+   - Compare options:
+     - Session/log indexing only
+     - Local semantic index (e.g., QMD-backed)
+     - External memory layer
+   - Prefer local-first until evidence says otherwise.
 
 5. **Ask clarifying questions**
    - Ask focused questions before locking recommendations.
-   - Prefer questions that resolve scope and maintenance tradeoffs.
+   - Resolve scope, maintenance, and reversibility tradeoffs.
 
 6. **Recommend in phases**
    - Toe-dip: smallest experiment today
    - Pilot: short validation run
    - Scale: only after evidence
 
-## Memory and session analysis checklist
+## Memory analysis checklist
 
-When the user asks about memory/session durability:
-
-- Verify what survives in session JSONL (`~/.pi/agent/sessions/...`)
+- Verify what survives in session JSONL
 - Explain compaction tradeoff (summary is lossy, full history remains in session file)
-- Check what logs already exist and their retention
-- Prefer local-first indexing initially
-- Prefer storing raw transcript excerpts + derived summaries/metadata (not summaries only)
-- Propose external memory integration only if clear value > maintenance cost
+- Check current logs and retention behavior
+- Prefer storing raw transcript excerpts + derived summaries/metadata
+- Propose external memory integration only if local-first is insufficient
 
 ## Output contract
 

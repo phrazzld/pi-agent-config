@@ -2,9 +2,9 @@
 
 ## Goal
 
-Evolve Pi config from real work signals while preventing command/catalog bloat.
+Evolve Pi config/process/tooling from real work signals while preventing command/catalog bloat.
 
-## Option A — Prompt + Skill only (toe-dip)
+## Option A — `/reflect` + skill only (toe-dip)
 
 **Artifacts**
 - `prompts/reflect.md`
@@ -12,6 +12,7 @@ Evolve Pi config from real work signals while preventing command/catalog bloat.
 
 **How it works**
 - Manual `/reflect` runs replay recent work, scan configs, research best practices, and propose scored candidates.
+- Scope is always both (repo + global).
 
 **Pros**
 - Minimal implementation cost
@@ -20,15 +21,15 @@ Evolve Pi config from real work signals while preventing command/catalog bloat.
 **Cons**
 - Research lanes run sequentially unless manually orchestrated
 
-## Option B — Reflection swarm (next)
+## Option B — Swarm inside `/reflect` (next)
 
 **Artifacts**
 - Subagent extension (local package or imported sample)
 - Agent definitions for reflection lanes (memory, legacy-config, pi-capability, external-research)
-- Optional `prompts/reflect-swarm.md`
 
 **How it works**
-- `/reflect` (or `/reflect-swarm`) launches parallel lanes and synthesizes findings.
+- `/reflect` recommends a swarm when subagents are available.
+- User chooses whether to launch, how many agents to run, and which lanes to cover.
 
 **Pros**
 - Better context isolation
@@ -38,20 +39,21 @@ Evolve Pi config from real work signals while preventing command/catalog bloat.
 - Higher runtime complexity
 - Requires maintaining subagent prompts
 
-## Option C — Local-first memory index (next/later)
+## Option C — Local-first memory index (now/next)
 
 **Artifacts**
-- Memory ingestion extension (sessions/logs/commits/issues/PRs)
-- Local index + search tool
-- Reflection prompt/skill updated to query memory index first
+- Memory ingestion/search extension
+- Local index + retrieval tools
+- Reflection wired to query memory first
 
-**Candidate engines**
-- Session JSONL parser + lightweight index (custom)
-- QMD (`https://github.com/tobi/qmd`) for local hybrid retrieval over markdown-derived artifacts
+**Current prototype direction**
+- QMD-backed local retrieval over session/log markdown corpus
+- Raw transcript excerpts + derived metadata/summaries
 
 **Pros**
 - Cross-session recall
 - Stronger reflection signal quality
+- No external SaaS dependency required
 
 **Cons**
 - Data modeling + ingestion maintenance
@@ -75,7 +77,7 @@ Evolve Pi config from real work signals while preventing command/catalog bloat.
 
 ## Recommended rollout
 
-1. Start with Option A (already in place).
-2. Add Option B (subagent swarm) when parallel research overhead is felt repeatedly.
-3. Add Option C local-first memory index once reflection quality is bottlenecked by recall.
-4. Evaluate Option D only if local-first is insufficient.
+1. Keep Option A as baseline.
+2. Add Option B inside `/reflect` when parallel research pressure appears.
+3. Continue Option C local-first memory prototype and validate retrieval quality.
+4. Evaluate Option D only if local-first memory is insufficient.

@@ -30,8 +30,16 @@ For our use case, this can index exported session-derived markdown + logs + docs
 - Needs ongoing ingestion/refresh automation
 - Additional local model/runtime dependencies
 
-## Proposed adoption path
+## Current prototype status
 
-1. **Toe-dip**: manually index a small synthetic memory corpus and test retrieval quality.
-2. **Pilot**: build a thin extension wrapper that queries QMD for `/reflect`.
-3. **Scale**: automate ingestion from sessions/logs and add retention rules.
+Implemented in `extensions/organic-workflows`:
+- `memory_ingest` tool + `/memory-ingest` command
+- `memory_search` tool + `/memory-search` command
+- Session/log excerpt export to markdown corpus
+- QMD collection bootstrap + update flow
+
+## Proposed next steps
+
+1. **Toe-dip**: install QMD locally and validate retrieval quality on recent sessions.
+2. **Pilot**: run `/reflect` with memory tools enabled and compare recommendation quality.
+3. **Scale**: refine ingestion schema + retention rules and optionally add embeddings cadence.
