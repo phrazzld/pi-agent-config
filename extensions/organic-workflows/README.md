@@ -3,7 +3,11 @@
 Opinionated workflow automation for:
 
 1. **`/squash-merge`** (code-enforced)
-   - validates PR readiness
+   - validates strict PR readiness
+     - PR open + not draft + merge-ready status
+     - CI/CD checks all green (no pending/failing)
+     - unresolved severe review threads block merge
+     - suspicious quality-gate weakening patterns block merge
    - performs squash merge
    - switches/pulls default branch
    - automatically triggers `/reflect ...`
@@ -13,6 +17,13 @@ Opinionated workflow automation for:
    - `memory_search` tool + `/memory-search` command
    - exports Pi session/log excerpts to markdown corpus
    - indexes corpus with QMD collection (`pi-memory` by default)
+
+### `/squash-merge` override flags
+
+Use sparingly and only after explicit manual review:
+
+- `--allow-unresolved-nits`
+- `--allow-quality-gate-changes`
 
 ## QMD prerequisite
 

@@ -27,15 +27,86 @@ interface IngestSummary {
   markerPath: string;
 }
 
+interface SquashMergeOptions {
+  prNumber: number;
+  reflectionFocus: string;
+  allowUnresolvedNits: boolean;
+  allowQualityGateChanges: boolean;
+}
+
+interface PullRequestMeta {
+  number: number;
+  state: string;
+  isDraft: boolean;
+  mergeStateStatus: string;
+  reviewDecision: string | null;
+  title: string;
+  url: string;
+}
+
+interface PrCheck {
+  name: string;
+  state: string;
+  link?: string;
+}
+
+interface PrFile {
+  filename: string;
+  patch?: string;
+}
+
+interface RepoIdentity {
+  owner: string;
+  name: string;
+}
+
+interface ReviewThread {
+  isResolved: boolean;
+  path?: string;
+  comments?: {
+    nodes?: Array<{
+      body?: string;
+      author?: {
+        login?: string;
+      };
+    }>;
+  };
+}
+
+interface ReviewThreadsResponse {
+  data?: {
+    repository?: {
+      pullRequest?: {
+        reviewThreads?: {
+          nodes?: ReviewThread[];
+          pageInfo?: {
+            hasNextPage?: boolean;
+          };
+        };
+      };
+    };
+  };
+}
+
+interface PrReadinessReport {
+  meta: PullRequestMeta | null;
+  blockers: string[];
+  warnings: string[];
+}
+
 const MEMORY_MODE = StringEnum(["keyword", "semantic", "hybrid"] as const);
+const SEVERITY_KEYWORD = /\b(critical|high severity|sev[ -]?[01]|security|vulnerab|data loss|blocker|must fix|major issue)\b/i;
 
 export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
   pi.registerCommand("squash-merge", {
-    description: "Squash-merge a PR and automatically trigger /reflect",
+    description: "Squash-merge a PR after strict readiness checks, then auto-run /reflect",
     handler: async (args, ctx) => {
       const parsed = parseSquashMergeArgs(args);
       if (!parsed) {
-        ctx.ui.notify("Usage: /squash-merge <pr-number> [reflection focus]", "warning");
+        ctx.ui.notify(
+          "Usage: /squash-merge <pr-number> [reflection focus] [--allow-unresolved-nits] [--allow-quality-gate-changes]",
+          "warning"
+        );
         return;
       }
 
@@ -51,61 +122,42 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const prMeta = await ghJson<{
-        number: number;
-        state: string;
-        isDraft: boolean;
-        mergeStateStatus: string;
-        reviewDecision: string | null;
-        title: string;
-        url: string;
-      }>(pi, cwd, [
-        "pr",
-        "view",
-        String(prNumber),
-        "--json",
-        "number,state,isDraft,mergeStateStatus,reviewDecision,title,url",
-      ]);
-
-      if (!prMeta) {
+      const readiness = await assessPrReadiness(pi, ctx, parsed);
+      if (!readiness.meta) {
         ctx.ui.notify(`Failed to load PR #${prNumber}.`, "error");
         return;
       }
 
-      if (prMeta.state !== "OPEN") {
-        ctx.ui.notify(`Blocked: PR #${prNumber} is not open (${prMeta.state}).`, "warning");
-        return;
-      }
-
-      if (prMeta.isDraft) {
-        ctx.ui.notify(`Blocked: PR #${prNumber} is draft.`, "warning");
-        return;
-      }
-
-      if (prMeta.reviewDecision === "CHANGES_REQUESTED") {
-        ctx.ui.notify(`Blocked: PR #${prNumber} has changes requested.`, "warning");
-        return;
-      }
-
-      if (prMeta.mergeStateStatus !== "CLEAN" && prMeta.mergeStateStatus !== "HAS_HOOKS") {
+      if (readiness.blockers.length > 0) {
         ctx.ui.notify(
-          `Blocked: mergeStateStatus=${prMeta.mergeStateStatus}. Resolve checks/conflicts first.`,
+          `Blocked: PR #${prNumber} is not ready:\n- ${readiness.blockers.join("\n- ")}`,
           "warning"
         );
         return;
       }
 
-      const checks = await pi.exec("gh", ["pr", "checks", String(prNumber)], {
-        cwd,
-        timeout: 120_000,
-      });
-      if (checks.code !== 0) {
-        const summary = firstNonEmptyLine(checks.stderr) ?? firstNonEmptyLine(checks.stdout);
-        ctx.ui.notify(
-          `Blocked: PR checks are not green${summary ? ` (${summary})` : ""}.`,
-          "warning"
+      if (readiness.warnings.length > 0) {
+        if (!ctx.hasUI) {
+          ctx.ui.notify(
+            `Blocked (non-interactive): readiness warnings require confirmation:\n- ${readiness.warnings.join("\n- ")}`,
+            "warning"
+          );
+          return;
+        }
+
+        const proceed = await ctx.ui.confirm(
+          "Merge readiness warnings",
+          [
+            `PR #${prNumber} has warnings:`,
+            ...readiness.warnings.map((w) => `- ${w}`),
+            "",
+            "Merge anyway?",
+          ].join("\n")
         );
-        return;
+        if (!proceed) {
+          ctx.ui.notify("Merge canceled due to readiness warnings.", "info");
+          return;
+        }
       }
 
       ctx.ui.setStatus("organic-workflows", `Squash-merging PR #${prNumber}...`);
@@ -709,21 +761,383 @@ async function ghJson<T>(pi: ExtensionAPI, cwd: string, args: string[]): Promise
   }
 }
 
-function parseSquashMergeArgs(args: string): { prNumber: number; reflectionFocus: string } | null {
+async function assessPrReadiness(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  options: SquashMergeOptions
+): Promise<PrReadinessReport> {
+  const blockers: string[] = [];
+  const warnings: string[] = [];
+
+  const meta = await ghJson<PullRequestMeta>(pi, ctx.cwd, [
+    "pr",
+    "view",
+    String(options.prNumber),
+    "--json",
+    "number,state,isDraft,mergeStateStatus,reviewDecision,title,url",
+  ]);
+
+  if (!meta) {
+    return { meta: null, blockers: ["Unable to load pull request metadata."], warnings };
+  }
+
+  if (meta.state !== "OPEN") {
+    blockers.push(`PR is not open (state=${meta.state}).`);
+  }
+  if (meta.isDraft) {
+    blockers.push("PR is still draft.");
+  }
+  if (meta.reviewDecision === "CHANGES_REQUESTED") {
+    blockers.push("Review decision is CHANGES_REQUESTED.");
+  }
+  if (meta.mergeStateStatus !== "CLEAN" && meta.mergeStateStatus !== "HAS_HOOKS") {
+    blockers.push(`mergeStateStatus=${meta.mergeStateStatus} (not merge-ready).`);
+  }
+
+  const checks = await ghJson<PrCheck[]>(pi, ctx.cwd, [
+    "pr",
+    "checks",
+    String(options.prNumber),
+    "--json",
+    "name,state,link",
+  ]);
+
+  if (!checks) {
+    const fallbackChecks = await pi.exec("gh", ["pr", "checks", String(options.prNumber)], {
+      cwd: ctx.cwd,
+      timeout: 120_000,
+    });
+    if (fallbackChecks.code !== 0) {
+      blockers.push(
+        `Unable to verify CI/CD checks (${firstNonEmptyLine(fallbackChecks.stderr) ?? "unknown error"}).`
+      );
+    }
+  } else {
+    const failing = checks.filter((check) => {
+      const state = check.state.toUpperCase();
+      return state === "FAILURE" || state === "ERROR" || state === "CANCELLED" || state === "TIMED_OUT";
+    });
+    const pending = checks.filter((check) => {
+      const state = check.state.toUpperCase();
+      return state === "PENDING" || state === "IN_PROGRESS" || state === "QUEUED" || state === "WAITING";
+    });
+
+    if (failing.length > 0) {
+      blockers.push(`CI/CD failing checks: ${failing.map((check) => check.name).join(", ")}`);
+    }
+    if (pending.length > 0) {
+      blockers.push(`CI/CD checks still pending: ${pending.map((check) => check.name).join(", ")}`);
+    }
+    if (checks.length === 0) {
+      warnings.push("No PR checks were reported by GitHub CLI.");
+    }
+  }
+
+  const repo = await getRepoIdentity(pi, ctx.cwd);
+  if (!repo) {
+    warnings.push("Could not resolve repository identity for deep review-thread checks.");
+  } else {
+    const threadScan = await fetchReviewThreads(pi, ctx.cwd, repo, options.prNumber);
+    if (threadScan) {
+      if (threadScan.truncated) {
+        warnings.push("Review thread scan truncated at 100 threads; manually verify long PR discussions.");
+      }
+
+      const unresolved = threadScan.threads.filter((thread) => !thread.isResolved);
+      const unresolvedSevere = unresolved.filter((thread) => hasSeveritySignal(threadSummary(thread)));
+
+      if (unresolvedSevere.length > 0) {
+        blockers.push(
+          `Unresolved severe review threads: ${unresolvedSevere
+            .slice(0, 3)
+            .map((thread) => thread.path ?? "(no-path)")
+            .join(", ")}`
+        );
+      }
+
+      const unresolvedNits = unresolved.length - unresolvedSevere.length;
+      if (unresolvedNits > 0) {
+        if (options.allowUnresolvedNits) {
+          warnings.push(
+            `Unresolved non-severe review threads: ${unresolvedNits} (allowed by --allow-unresolved-nits).`
+          );
+        } else {
+          warnings.push(
+            `Unresolved non-severe review threads: ${unresolvedNits}. Resolve or run with --allow-unresolved-nits after manual review.`
+          );
+        }
+      }
+    } else {
+      warnings.push("Could not inspect review threads via GraphQL.");
+    }
+
+    const files = await ghJson<PrFile[]>(pi, ctx.cwd, [
+      "api",
+      `repos/${repo.owner}/${repo.name}/pulls/${options.prNumber}/files?per_page=100`,
+    ]);
+
+    if (!files) {
+      warnings.push("Could not inspect changed files for quality-gate weakening patterns.");
+    } else {
+      const findings = detectQualityGateFindings(files);
+      if (findings.length > 0) {
+        if (options.allowQualityGateChanges) {
+          warnings.push(
+            `Potential quality-gate weakening detected (allowed by --allow-quality-gate-changes): ${findings
+              .slice(0, 3)
+              .join("; ")}`
+          );
+        } else {
+          blockers.push(
+            `Potential quality-gate weakening detected: ${findings
+              .slice(0, 3)
+              .join("; ")} (use --allow-quality-gate-changes only after explicit review).`
+          );
+        }
+      }
+    }
+  }
+
+  return { meta, blockers, warnings };
+}
+
+async function getRepoIdentity(pi: ExtensionAPI, cwd: string): Promise<RepoIdentity | null> {
+  const repo = await ghJson<{ owner?: { login?: string }; name?: string }>(pi, cwd, [
+    "repo",
+    "view",
+    "--json",
+    "owner,name",
+  ]);
+
+  const owner = repo?.owner?.login?.trim();
+  const name = repo?.name?.trim();
+  if (!owner || !name) {
+    return null;
+  }
+  return { owner, name };
+}
+
+async function fetchReviewThreads(
+  pi: ExtensionAPI,
+  cwd: string,
+  repo: RepoIdentity,
+  prNumber: number
+): Promise<{ threads: ReviewThread[]; truncated: boolean } | null> {
+  const query = [
+    "query($owner:String!, $name:String!, $number:Int!) {",
+    "  repository(owner:$owner, name:$name) {",
+    "    pullRequest(number:$number) {",
+    "      reviewThreads(first:100) {",
+    "        nodes {",
+    "          isResolved",
+    "          path",
+    "          comments(first:20) {",
+    "            nodes {",
+    "              body",
+    "              author { login }",
+    "            }",
+    "          }",
+    "        }",
+    "        pageInfo { hasNextPage }",
+    "      }",
+    "    }",
+    "  }",
+    "}",
+  ].join("\n");
+
+  const result = await pi.exec(
+    "gh",
+    [
+      "api",
+      "graphql",
+      "-f",
+      `query=${query}`,
+      "-F",
+      `owner=${repo.owner}`,
+      "-F",
+      `name=${repo.name}`,
+      "-F",
+      `number=${prNumber}`,
+    ],
+    { cwd, timeout: 120_000 }
+  );
+
+  if (result.code !== 0) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(result.stdout) as ReviewThreadsResponse;
+    const reviewThreads = parsed.data?.repository?.pullRequest?.reviewThreads;
+    return {
+      threads: reviewThreads?.nodes ?? [],
+      truncated: Boolean(reviewThreads?.pageInfo?.hasNextPage),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function threadSummary(thread: ReviewThread): string {
+  const comments = thread.comments?.nodes ?? [];
+  const bodies = comments
+    .map((comment) => comment.body?.trim() ?? "")
+    .filter(Boolean)
+    .join("\n");
+  return `${thread.path ?? "(no-path)"}\n${bodies}`.trim();
+}
+
+function hasSeveritySignal(text: string): boolean {
+  return SEVERITY_KEYWORD.test(text);
+}
+
+function detectQualityGateFindings(files: PrFile[]): string[] {
+  const findings: string[] = [];
+
+  for (const file of files) {
+    if (!isQualityGateFile(file.filename)) {
+      continue;
+    }
+
+    const patch = file.patch ?? "";
+    if (!patch) {
+      findings.push(`${file.filename}: changed quality-gate-related file (patch unavailable)`);
+      continue;
+    }
+
+    if (/^\+.*continue-on-error:\s*true/im.test(patch)) {
+      findings.push(`${file.filename}: adds continue-on-error: true`);
+    }
+    if (/^\+.*\|\|\s*true\s*$/im.test(patch)) {
+      findings.push(`${file.filename}: adds '|| true' failure bypass`);
+    }
+    if (/^\+.*--passWithNoTests\b/im.test(patch)) {
+      findings.push(`${file.filename}: allows passWithNoTests`);
+    }
+    if (/^\+.*--max-warnings\s+[1-9]\d*/im.test(patch)) {
+      findings.push(`${file.filename}: increases --max-warnings tolerance`);
+    }
+
+    findings.push(...extractLoweredThresholdFindings(file.filename, patch));
+  }
+
+  return dedupe(findings);
+}
+
+function isQualityGateFile(filePath: string): boolean {
+  const normalized = filePath.replace(/\\/g, "/").toLowerCase();
+  return (
+    normalized.startsWith(".github/workflows/") ||
+    normalized === "package.json" ||
+    normalized === "codecov.yml" ||
+    normalized === ".codecov.yml" ||
+    normalized === ".coveragerc" ||
+    normalized.includes("vitest.config") ||
+    normalized.includes("jest.config") ||
+    normalized.includes("eslint.config") ||
+    normalized.includes(".eslintrc") ||
+    normalized.includes("tsconfig") ||
+    normalized.includes("lefthook") ||
+    normalized.includes(".husky") ||
+    normalized.includes("commitlint")
+  );
+}
+
+function extractLoweredThresholdFindings(filePath: string, patch: string): string[] {
+  const findings: string[] = [];
+  const removed = new Map<string, number>();
+
+  const lines = patch.split("\n");
+  for (const line of lines) {
+    const parsed = parseThresholdLine(line);
+    if (!parsed) {
+      continue;
+    }
+
+    const key = `${filePath}:${parsed.metric}`;
+    if (parsed.kind === "removed") {
+      removed.set(key, parsed.value);
+      continue;
+    }
+
+    const previous = removed.get(key);
+    if (previous !== undefined && parsed.value < previous) {
+      findings.push(`${filePath}: lowers ${parsed.metric} threshold (${previous} -> ${parsed.value})`);
+      continue;
+    }
+
+    if (parsed.value <= 5 && /(coverage|threshold|minimum_coverage)/i.test(parsed.metric)) {
+      findings.push(`${filePath}: sets ${parsed.metric} threshold to very low value (${parsed.value})`);
+    }
+  }
+
+  return findings;
+}
+
+function parseThresholdLine(
+  line: string
+): { kind: "added" | "removed"; metric: string; value: number } | null {
+  if (!(line.startsWith("+") || line.startsWith("-"))) {
+    return null;
+  }
+  if (line.startsWith("+++") || line.startsWith("---")) {
+    return null;
+  }
+
+  const lowered = line.toLowerCase();
+  if (!/(coverage|threshold|minimum_coverage|lines|branches|functions|statements)/.test(lowered)) {
+    return null;
+  }
+
+  const metricMatch = lowered.match(
+    /(minimum_coverage|coverage_threshold|coverage|threshold|lines|branches|functions|statements)/
+  );
+  const valueMatch = lowered.match(/(-?\d+(?:\.\d+)?)/);
+
+  if (!metricMatch || !valueMatch) {
+    return null;
+  }
+
+  return {
+    kind: line.startsWith("+") ? "added" : "removed",
+    metric: metricMatch[1],
+    value: Number(valueMatch[1]),
+  };
+}
+
+function dedupe(values: string[]): string[] {
+  return Array.from(new Set(values));
+}
+
+function parseSquashMergeArgs(args: string): SquashMergeOptions | null {
   const trimmed = args.trim();
   if (!trimmed) {
     return null;
   }
 
-  const [prToken, ...rest] = trimmed.split(/\s+/);
-  const prNumber = Number(prToken);
+  const tokens = trimmed.split(/\s+/);
+  const prNumber = Number(tokens[0]);
   if (!Number.isInteger(prNumber) || prNumber <= 0) {
     return null;
   }
 
+  const flags = new Set<string>();
+  const focusTokens: string[] = [];
+
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.startsWith("--")) {
+      flags.add(token);
+    } else {
+      focusTokens.push(token);
+    }
+  }
+
   return {
     prNumber,
-    reflectionFocus: rest.join(" ").trim(),
+    reflectionFocus: focusTokens.join(" ").trim(),
+    allowUnresolvedNits: flags.has("--allow-unresolved-nits"),
+    allowQualityGateChanges: flags.has("--allow-quality-gate-changes"),
   };
 }
 
