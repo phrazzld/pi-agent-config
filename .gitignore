@@ -1,0 +1,10 @@
+# Secrets/runtime state: never version these.
+auth.json
+sessions/
+.env
+.env.local
+
+# OS/editor noise.
+.DS_Store
+*.swp
+
