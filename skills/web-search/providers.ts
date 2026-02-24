@@ -1,6 +1,125 @@
 import type { ProviderAdapter, SearchRequest, SearchResult } from "./provider-adapter";
+import { isoTimestampDaysAgo } from "./query-utils";
 
 const DEFAULT_LIMIT = 5;
+const CONTEXT7_BASE_URL = process.env.CONTEXT7_BASE_URL ?? "https://context7.com/api/v1";
+const PERPLEXITY_MODEL = process.env.PERPLEXITY_MODEL ?? "sonar";
+
+type Context7SearchItem = {
+  id?: string;
+  title?: string;
+  name?: string;
+  url?: string;
+  description?: string;
+  snippets?: string[];
+  score?: number;
+};
+
+export class Context7Provider implements ProviderAdapter {
+  readonly name = "context7" as const;
+  private readonly apiKey: string;
+
+  constructor(apiKey: string) {
+    this.apiKey = apiKey;
+  }
+
+  async search(request: SearchRequest): Promise<SearchResult[]> {
+    const payload = await this.searchPayload(request.query);
+
+    const items = (payload.results ?? payload.data ?? []).slice(0, request.limit ?? DEFAULT_LIMIT);
+    if (items.length === 0) {
+      return [];
+    }
+
+    const mapped = items.map((item, index) => {
+      const fallbackUrl = item.id ? `https://context7.com/${item.id}` : "";
+      return {
+        title: item.title ?? item.name ?? (fallbackUrl || "Context7 result"),
+        url: item.url ?? fallbackUrl,
+        snippet: item.description ?? firstSnippet(item.snippets),
+        published_at: null,
+        score: scoreFromRank(index),
+        source_provider: "context7" as const,
+      };
+    });
+
+    // For explicit docs mode, enrich the first result with actual documentation text.
+    if (request.command === "web-docs" && items[0]?.id) {
+      const docsSnippet = await this.fetchDocSnippet(items[0].id);
+      if (docsSnippet) {
+        mapped[0] = {
+          ...mapped[0],
+          snippet: docsSnippet,
+        };
+      }
+    }
+
+    return mapped.filter((item) => Boolean(item.url));
+  }
+
+  private async searchPayload(
+    query: string
+  ): Promise<{ results?: Context7SearchItem[]; data?: Context7SearchItem[] }> {
+    const postResponse = await fetch(`${CONTEXT7_BASE_URL}/search`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${this.apiKey}`,
+      },
+      body: JSON.stringify({
+        query,
+      }),
+    });
+
+    if (postResponse.ok) {
+      return (await postResponse.json()) as { results?: Context7SearchItem[]; data?: Context7SearchItem[] };
+    }
+
+    // Context7 deployments differ; some only support GET.
+    if (postResponse.status === 405) {
+      const params = new URLSearchParams({ query });
+      const getResponse = await fetch(`${CONTEXT7_BASE_URL}/search?${params}`, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${this.apiKey}`,
+        },
+      });
+      if (getResponse.ok) {
+        return (await getResponse.json()) as {
+          results?: Context7SearchItem[];
+          data?: Context7SearchItem[];
+        };
+      }
+      throw new Error(`context7 search failed: ${getResponse.status}`);
+    }
+
+    throw new Error(`context7 search failed: ${postResponse.status}`);
+  }
+
+  private async fetchDocSnippet(context7Id: string): Promise<string | null> {
+    try {
+      const response = await fetch(`${CONTEXT7_BASE_URL}/${context7Id}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          tokens: 1800,
+        }),
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const payload = (await response.json()) as Record<string, unknown>;
+      return extractBestDocSnippet(payload);
+    } catch {
+      return null;
+    }
+  }
+}
 
 export class ExaProvider implements ProviderAdapter {
   readonly name = "exa" as const;
@@ -11,6 +130,9 @@ export class ExaProvider implements ProviderAdapter {
   }
 
   async search(request: SearchRequest): Promise<SearchResult[]> {
+    const recencyStart =
+      typeof request.recencyDays === "number" ? isoTimestampDaysAgo(request.recencyDays) : null;
+
     const response = await fetch("https://api.exa.ai/search", {
       method: "POST",
       headers: {
@@ -20,6 +142,7 @@ export class ExaProvider implements ProviderAdapter {
       body: JSON.stringify({
         query: request.query,
         numResults: request.limit ?? DEFAULT_LIMIT,
+        ...(recencyStart ? { startPublishedDate: recencyStart } : {}),
       }),
     });
 
@@ -63,6 +186,11 @@ export class BraveProvider implements ProviderAdapter {
       q: request.query,
       count: String(request.limit ?? DEFAULT_LIMIT),
     });
+
+    const freshness = freshnessFromRecencyDays(request.recencyDays);
+    if (freshness) {
+      query.set("freshness", freshness);
+    }
 
     const response = await fetch(`https://api.search.brave.com/res/v1/web/search?${query}`, {
       headers: {
@@ -108,6 +236,25 @@ export class PerplexitySynthesisProvider implements ProviderAdapter {
   }
 
   async search(request: SearchRequest): Promise<SearchResult[]> {
+    const synthesis = await this.synthesize(request.query, []);
+    return synthesis.citations.map((url, index) => ({
+      title: "Perplexity citation",
+      url,
+      snippet: synthesis.summary,
+      published_at: null,
+      score: scoreFromRank(index),
+      source_provider: "perplexity" as const,
+    }));
+  }
+
+  async synthesize(
+    query: string,
+    sources: SearchResult[]
+  ): Promise<{ summary: string; citations: string[] }> {
+    const sourceLines = sources
+      .map((result, index) => `${index + 1}. ${result.title} :: ${result.url}`)
+      .join("\n");
+
     const response = await fetch("https://api.perplexity.ai/chat/completions", {
       method: "POST",
       headers: {
@@ -115,16 +262,21 @@ export class PerplexitySynthesisProvider implements ProviderAdapter {
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: "sonar",
+        model: PERPLEXITY_MODEL,
         messages: [
           {
             role: "system",
             content:
-              "Return links only. Never invent links. Keep output factual and concise.",
+              "Summarize using provided sources. Never invent URLs. Keep uncertainty explicit.",
           },
           {
             role: "user",
-            content: request.query,
+            content: [
+              `Query: ${query}`,
+              "Use these source URLs as ground truth:",
+              sourceLines || "(No explicit sources were provided.)",
+              "Return concise synthesis and include citations from sources.",
+            ].join("\n"),
           },
         ],
       }),
@@ -135,17 +287,25 @@ export class PerplexitySynthesisProvider implements ProviderAdapter {
     }
 
     const payload = (await response.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string;
+        };
+      }>;
       citations?: string[];
+      search_results?: Array<{ url?: string }>;
     };
 
-    return (payload.citations ?? []).map((url, index) => ({
-      title: "Perplexity citation",
-      url,
-      snippet: "",
-      published_at: null,
-      score: scoreFromRank(index),
-      source_provider: "perplexity" as const,
-    }));
+    const modelSummary = payload.choices?.[0]?.message?.content?.trim() ?? "";
+    const citations = dedupeUrls([
+      ...(payload.citations ?? []),
+      ...((payload.search_results ?? []).map((item) => item.url).filter(Boolean) as string[]),
+    ]);
+
+    return {
+      summary: modelSummary,
+      citations,
+    };
   }
 }
 
@@ -154,3 +314,75 @@ function scoreFromRank(index: number): number {
   return value > 0 ? value : 0;
 }
 
+function freshnessFromRecencyDays(recencyDays: number | undefined): "pd" | "pw" | "pm" | "py" | null {
+  if (typeof recencyDays !== "number") {
+    return null;
+  }
+  if (recencyDays <= 1) {
+    return "pd";
+  }
+  if (recencyDays <= 7) {
+    return "pw";
+  }
+  if (recencyDays <= 31) {
+    return "pm";
+  }
+  return "py";
+}
+
+function firstSnippet(snippets: string[] | undefined): string {
+  if (!snippets || snippets.length === 0) {
+    return "";
+  }
+  return snippets[0];
+}
+
+function dedupeUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  const deduped: string[] = [];
+  for (const url of urls) {
+    const normalized = url.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    deduped.push(normalized);
+  }
+  return deduped;
+}
+
+function extractBestDocSnippet(payload: Record<string, unknown>): string | null {
+  const directText = payload.content;
+  if (typeof directText === "string" && directText.trim()) {
+    return truncateSnippet(directText);
+  }
+
+  const textField = payload.text;
+  if (typeof textField === "string" && textField.trim()) {
+    return truncateSnippet(textField);
+  }
+
+  const chunks = payload.chunks;
+  if (Array.isArray(chunks)) {
+    for (const chunk of chunks) {
+      if (typeof chunk === "string" && chunk.trim()) {
+        return truncateSnippet(chunk);
+      }
+      if (
+        typeof chunk === "object" &&
+        chunk &&
+        "content" in chunk &&
+        typeof (chunk as { content?: unknown }).content === "string"
+      ) {
+        return truncateSnippet((chunk as { content: string }).content);
+      }
+    }
+  }
+
+  return null;
+}
+
+function truncateSnippet(input: string): string {
+  const trimmed = input.trim().replace(/\s+/g, " ");
+  return trimmed.length > 480 ? `${trimmed.slice(0, 477)}...` : trimmed;
+}

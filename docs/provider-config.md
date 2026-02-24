@@ -1,14 +1,16 @@
 # Web Provider Config
 
 ## Environment Variables
+- `CONTEXT7_API_KEY`: docs/library lookup provider (first for docs-style queries)
 - `EXA_API_KEY`: primary provider for retrieval/extraction
 - `BRAVE_API_KEY`: fallback provider for broad search
 - `PERPLEXITY_API_KEY`: optional synthesis pass (never source of truth)
 
 ## Provider Order
-1. Exa (`/web`, `/web-deep`, `/web-news`)
-2. Brave fallback when Exa errors or times out
-3. Perplexity optional synthesis after links are collected
+1. Context7 (`/web-docs`, docs-style queries)
+2. Exa (`/web`, `/web-deep`, `/web-news`)
+3. Brave fallback when upstream provider errors or times out
+4. Perplexity optional synthesis after links are collected
 
 ## Cache and Cost Controls
 - `WEB_SEARCH_MAX_RESULTS` limits provider result count (default `5`)
@@ -24,12 +26,10 @@
 - Latest/today queries must set recency bias/filter
 - Low-confidence answers must state uncertainty explicitly
 - Synthesis must preserve source URLs from provider results
+- Perplexity may summarize, but never replaces retrieval sources
 
 ## Output Schema
-Each result item should expose:
-- `title`
-- `url`
-- `snippet`
-- `published_at`
-- `score`
-- `source_provider`
+Top-level response should expose:
+- `results[]` (items with `title`, `url`, `snippet`, `published_at`, `score`, `source_provider`)
+- `meta` (`provider_chain`, `provider_used`, `cache_hit`, `time_sensitive`, `recency_days`, `confidence`, `uncertainty`)
+- `synthesis` (`summary`, `citations`) or `null`

@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { SearchRequest } from "./provider-adapter";
+import { normalizeQuery } from "./query-utils";
 
 interface CacheEntry<T> {
   expiresAt: number;
@@ -68,8 +69,13 @@ export class QueryCache<T> {
 }
 
 function cacheKey(request: SearchRequest): string {
-  const normalizedQuery = request.query.trim().toLowerCase().replace(/\s+/g, " ");
-  const key = `${request.command}:${normalizedQuery}:${request.limit ?? ""}`;
+  const normalizedQuery = normalizeQuery(request.query);
+  const key = [
+    "v2",
+    request.command,
+    normalizedQuery,
+    request.limit ?? "",
+    request.recencyDays ?? "",
+  ].join(":");
   return createHash("sha256").update(key).digest("hex");
 }
-

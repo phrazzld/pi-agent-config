@@ -3,10 +3,17 @@ import path from "node:path";
 
 import type { SearchRequest, SearchResult, ProviderAdapter } from "./provider-adapter";
 import type { QueryCache } from "./cache";
+import { dedupeByCanonicalUrl, normalizeQuery } from "./query-utils";
 
 export interface OrchestratorOptions {
   cache?: QueryCache<SearchResult[]>;
   logPath?: string;
+}
+
+export interface SearchRunMeta {
+  cacheHit: boolean;
+  providerUsed: ProviderAdapter["name"] | null;
+  providerChain: ProviderAdapter["name"][];
 }
 
 interface LogEvent {
@@ -34,15 +41,32 @@ export class WebSearchOrchestrator {
   }
 
   async search(request: SearchRequest): Promise<SearchResult[]> {
+    const { results } = await this.searchWithMeta(request);
+    return results;
+  }
+
+  async searchWithMeta(
+    request: SearchRequest
+  ): Promise<{ results: SearchResult[]; meta: SearchRunMeta }> {
+    const providerChain = this.providers.map((provider) => provider.name);
+
     if (this.cache) {
       const cached = await this.cache.get(request);
       if (cached) {
         await this.log({ event: "cache_hit", request, count: cached.length });
-        return cached;
+        return {
+          results: cached,
+          meta: {
+            cacheHit: true,
+            providerUsed: cached[0]?.source_provider ?? null,
+            providerChain,
+          },
+        };
       }
     }
 
     let lastError: unknown = null;
+    await this.log({ event: "cache_miss", request });
 
     for (const provider of this.providers) {
       try {
@@ -52,7 +76,7 @@ export class WebSearchOrchestrator {
           continue;
         }
 
-        const deduped = dedupeByUrl(results);
+        const deduped = dedupeByCanonicalUrl(results);
         if (this.cache) {
           await this.cache.set(request, deduped);
         }
@@ -63,7 +87,14 @@ export class WebSearchOrchestrator {
           provider,
           count: deduped.length,
         });
-        return deduped;
+        return {
+          results: deduped,
+          meta: {
+            cacheHit: false,
+            providerUsed: provider.name,
+            providerChain,
+          },
+        };
       } catch (error) {
         lastError = error;
         await this.log({
@@ -84,7 +115,14 @@ export class WebSearchOrchestrator {
     if (lastError) {
       throw lastError;
     }
-    return [];
+    return {
+      results: [],
+      meta: {
+        cacheHit: false,
+        providerUsed: null,
+        providerChain,
+      },
+    };
   }
 
   private async log(input: {
@@ -101,7 +139,7 @@ export class WebSearchOrchestrator {
     const payload: LogEvent = {
       ts: new Date().toISOString(),
       event: input.event,
-      query: input.request.query,
+      query: normalizeQuery(input.request.query),
       command: input.request.command,
       provider: input.provider?.name,
       count: input.count,
@@ -112,19 +150,3 @@ export class WebSearchOrchestrator {
     await appendFile(this.logPath, `${JSON.stringify(payload)}\n`, "utf8");
   }
 }
-
-function dedupeByUrl(results: SearchResult[]): SearchResult[] {
-  const seen = new Set<string>();
-  const deduped: SearchResult[] = [];
-
-  for (const result of results) {
-    if (seen.has(result.url)) {
-      continue;
-    }
-    seen.add(result.url);
-    deduped.push(result);
-  }
-
-  return deduped;
-}
-
