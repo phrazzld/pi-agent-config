@@ -16,6 +16,10 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `extensions/guardrails`: irreversible-command blocks + post-edit checks
 - `extensions/profiles`: `/profile` modes (`ultrathink`, `execute`, `ship`, `fast`)
 
+## Included Skills
+- `skills/web-search`: retrieval-first web research workflow and output contract
+- `skills/organic-reflection`: usage-driven codification and tradeoff-scored improvement planning
+
 ## Included Workflow Prompts
 - `/execute`
 - `/spec`
@@ -25,6 +29,9 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `/fix-ci`
 - `/groom`
 - `/autopilot`
+- `/reflect`
+- `/reflect-swarm`
+- `/squash-merge`
 
 ## Setup
 ```bash
