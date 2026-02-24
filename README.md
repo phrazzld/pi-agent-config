@@ -15,6 +15,12 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `extensions/web-search`: `web_search` tool + `/web*` commands
 - `extensions/guardrails`: irreversible-command blocks + post-edit checks
 - `extensions/profiles`: `/profile` modes (`ultrathink`, `execute`, `ship`, `fast`)
+- `extensions/organic-workflows`: code-enforced `/squash-merge` + local-first QMD memory ingest/search
+
+## Included Skills
+- `skills/web-search`: retrieval-first web research workflow and output contract
+- `skills/organic-reflection`: usage-driven codification and tradeoff-scored improvement planning
+- `skills/pr-feedback`: GH CLI-first PR feedback triage, fix/commit loop, and reviewer reply templates
 
 ## Included Workflow Prompts
 - `/execute`
@@ -25,10 +31,22 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `/fix-ci`
 - `/groom`
 - `/autopilot`
+- `/reflect`
+
+## Included Workflow Commands (extension-backed)
+- `/squash-merge`
+- `/memory-ingest`
+- `/memory-search`
 
 ## Setup
 ```bash
 ./scripts/bootstrap.sh
+```
+
+Optional (QMD local-memory prototype):
+```bash
+./scripts/setup-qmd.sh
+/memory-ingest --force
 ```
 
 ## Required Env
@@ -39,6 +57,13 @@ Core retrieval keys:
 - `EXA_API_KEY` (primary retrieval)
 - `BRAVE_API_KEY` (fallback retrieval)
 - `PERPLEXITY_API_KEY` (optional synthesis)
+
+Optional local-memory knobs (QMD prototype):
+- `PI_MEMORY_QMD_COLLECTION` (default: `pi-memory`)
+- `PI_MEMORY_CORPUS_DIR` (default: `~/.pi/agent/cache/memory-corpus`)
+- `PI_MEMORY_SESSION_LIMIT`
+- `PI_MEMORY_MAX_CHARS_PER_SESSION`
+- `PI_MEMORY_SYNC_TTL_MS`
 
 ## Settings Sync
 ```bash
