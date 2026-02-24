@@ -8,7 +8,7 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `extensions/`: local extensions (symlinked into runtime)
 - `prompts/`: prompt templates (symlinked into runtime)
 - `themes/`: themes (symlinked into runtime)
-- `docs/`: provider docs and policy
+- `docs/`: provider docs, context layering, and policy
 - `scripts/`: bootstrap/sync scripts
 
 ## Included Runtime Extensions
@@ -30,6 +30,9 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 ```bash
 ./scripts/bootstrap.sh
 ```
+
+## Context Layering
+See `docs/context-layering.md` for `AGENTS.md` cascade behavior and subdirectory strategy.
 
 ## Required Env
 See `.env.example` and `docs/provider-config.md`.
