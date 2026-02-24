@@ -90,7 +90,11 @@ After opening the PR:
 8. **Review loop**
    - Triage review comments (especially critical/high)
    - Push fixes or post scoped responses + follow-up issue links
-9. **Retro note**
+9. **Polish pass (pre-merge quality ratchet)**
+   - Once CI is green and comments are resolved, run `/polish`
+   - Improve refactors/docs/quality gates where low-risk and high-value
+   - Track explicit follow-up issues for deferred quality improvements
+10. **Retro note**
    - Record scope changes, blockers, and one reusable insight
 
 ## Stopping Conditions

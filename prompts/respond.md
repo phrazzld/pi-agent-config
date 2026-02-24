@@ -1,43 +1,66 @@
 ---
-description: Address PR feedback directly from GitHub and close the loop with code, commits, and reviewer replies
+description: Pull PR feedback from GitHub, implement fixes, and post clear, accessible reviewer responses
 ---
-When handling PR feedback, do **not** wait for pasted input. Pull feedback from GitHub for the PR on the current branch.
+# RESPOND
 
-Workflow:
+> Close the PR feedback loop with strong engineering execution and excellent written communication.
+
+## Non-negotiable communication bar
+
+Every GitHub comment/reply must be:
+1. **Skimmable**: short paragraphs, bullets, clear sectioning
+2. **Direct**: lead with the decision/result in line one
+3. **Accessible**: plain language, minimal jargon, explicit scope
+4. **Evidence-based**: include file paths + verification outcomes
+5. **Clean**: no raw logs/stdout dumps or noisy stack traces
+6. **Professional**: respectful, accountable, and specific
+
+## Workflow
 
 1. **Discover PR context**
-   - Use `gh pr status` to identify the PR tied to the current branch.
-   - If no PR is found, ask for PR number/repo.
+   - `gh pr status` to find the PR for the current branch
+   - if none, ask for PR number/repo
 
-2. **Fetch all feedback with GH CLI**
+2. **Fetch feedback from GitHub (don’t wait for pasted comments)**
    - Review comments: `gh api repos/<owner>/<repo>/pulls/<pr>/comments --paginate`
    - Review summaries: `gh api repos/<owner>/<repo>/pulls/<pr>/reviews --paginate`
-   - General PR/issue comments (outside-diff notes): `gh api repos/<owner>/<repo>/issues/<pr>/comments --paginate`
+   - PR/issue comments: `gh api repos/<owner>/<repo>/issues/<pr>/comments --paginate`
 
-3. **Triage each actionable comment**
-   - Classify: `bug | risk | style | question`
-   - Decision: `fix now | defer | reject` with reason
-   - Ignore pure acknowledgements/duplicates unless they request action
+3. **Triage actionable items**
+   - classify: `bug | risk | style | question`
+   - severity: `critical | high | medium | low`
+   - decision: `fix now | defer | reject` + reason
+   - ignore acknowledgements/duplicates unless they request action
 
-4. **Implement approved fixes**
-   - Edit code/docs precisely
-   - Run relevant verification commands when available
+4. **Apply policy**
+   - `critical/high`: fix now by default
+   - `medium`: fix now or defer with rationale + follow-up issue
+   - `low`: optional unless cheap/high-signal
 
-5. **Commit before replying**
-   - Stage only intended files
-   - Create a clear commit describing the addressed feedback
+5. **Implement + verify**
+   - apply precise changes
+   - run relevant checks
+   - stage only intended files
+   - commit before posting replies
 
-6. **Post reviewer responses on GitHub**
-   - Reply inline for line comments where possible
-   - Post a PR comment for outside-diff/general feedback
-   - Include exact text:
-     - `Classification: ...`
-     - `Decision: ...`
-     - `Change: ...`
-     - `Verification: ...` (or `N/A`)
+6. **Reply on GitHub with high-quality formatting**
+   - inline reply for line comments where possible
+   - PR-level comment for outside-diff feedback
+   - use this exact structure:
+     - `Classification: <bug|risk|style|question>`
+     - `Severity: <critical|high|medium|low>`
+     - `Decision: <fix now|defer|reject>. <reason>`
+     - `Change: <specific files/behavior changed>`
+     - `Verification: <commands + concise outcome | N/A>`
 
-7. **Return final summary**
-   - Files changed
-   - Commit hash(es)
-   - Which comments were fixed/deferred/rejected
-   - Exact response text posted
+7. **Final quality check before sending**
+   - no empty bullets
+   - no escaped `\n` artifacts
+   - no pasted runtime/test logs
+   - concise and readable on first pass
+
+8. **Return summary**
+   - files changed
+   - commit hash(es)
+   - comment disposition (fixed/deferred/rejected)
+   - exact text posted

@@ -25,6 +25,7 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `skills/web-search`: retrieval-first web research workflow and output contract
 - `skills/organic-reflection`: usage-driven codification and tradeoff-scored improvement planning
 - `skills/pr-feedback`: GH CLI-first PR feedback triage, fix/commit loop, and reviewer reply templates
+- `skills/pr-polish`: final post-review polish pass (refactor, quality gates, docs, reliability) before merge
 
 ## Included Workflow Prompts
 - `/execute`
@@ -32,6 +33,7 @@ Versioned config for PI agent runtime (`~/.pi/agent`).
 - `/architect`
 - `/pr`
 - `/respond`
+- `/polish`
 - `/fix-ci`
 - `/groom`
 - `/autopilot`
