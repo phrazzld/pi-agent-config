@@ -26,7 +26,7 @@ For our use case, this can index exported session-derived markdown + logs + docs
 
 ## Risks / caveats
 
-- Requires a local indexing pipeline from JSONL session files to markdown docs
+- Requires a local indexing pipeline from JSONL session files to Markdown docs
 - Needs ongoing ingestion/refresh automation
 - Additional local model/runtime dependencies
 

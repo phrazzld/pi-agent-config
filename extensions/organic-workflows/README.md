@@ -18,7 +18,7 @@ Opinionated workflow automation for:
    - exports Pi session/log excerpts to markdown corpus
    - indexes corpus with QMD collection (`pi-memory` by default)
 
-### `/squash-merge` override flags
+## `/squash-merge` override flags
 
 Use sparingly and only after explicit manual review:
 

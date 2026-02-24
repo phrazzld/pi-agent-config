@@ -96,6 +96,8 @@ interface PrReadinessReport {
 
 const MEMORY_MODE = StringEnum(["keyword", "semantic", "hybrid"] as const);
 const SEVERITY_KEYWORD = /\b(critical|high severity|sev[ -]?[01]|security|vulnerab|data loss|blocker|must fix|major issue)\b/i;
+const ANSI_CSI_REGEX = new RegExp("\\u001b\\[[0-9;]*[A-Za-z]", "g");
+const ANSI_OSC_REGEX = new RegExp("\\u001b\\][^\\u0007]*\\u0007", "g");
 
 export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
   pi.registerCommand("squash-merge", {
@@ -175,8 +177,25 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
       }
 
       const defaultBranch = await detectDefaultBranch(pi, cwd);
-      await pi.exec("git", ["checkout", defaultBranch], { cwd, timeout: 60_000 });
-      await pi.exec("git", ["pull", "--ff-only"], { cwd, timeout: 120_000 });
+
+      const checkout = await pi.exec("git", ["checkout", defaultBranch], { cwd, timeout: 60_000 });
+      if (checkout.code !== 0) {
+        ctx.ui.setStatus("organic-workflows", "");
+        const summary = firstNonEmptyLine(checkout.stderr) ?? firstNonEmptyLine(checkout.stdout);
+        ctx.ui.notify(
+          `Post-merge sync failed during git checkout ${defaultBranch}${summary ? ` (${summary})` : ""}.`,
+          "error"
+        );
+        return;
+      }
+
+      const pull = await pi.exec("git", ["pull", "--ff-only"], { cwd, timeout: 120_000 });
+      if (pull.code !== 0) {
+        ctx.ui.setStatus("organic-workflows", "");
+        const summary = firstNonEmptyLine(pull.stderr) ?? firstNonEmptyLine(pull.stdout);
+        ctx.ui.notify(`Post-merge sync failed during git pull${summary ? ` (${summary})` : ""}.`, "error");
+        return;
+      }
 
       ctx.ui.setStatus("organic-workflows", "");
 
@@ -367,7 +386,8 @@ async function ingestMemory(pi: ExtensionAPI, ctx: ExtensionContext, options: In
       if (!rendered) {
         continue;
       }
-      const fileName = path.basename(logFile.path).replace(/[^a-zA-Z0-9_.-]/g, "_");
+      const relative = path.relative(logsRoot, logFile.path) || path.basename(logFile.path);
+      const fileName = relative.replace(/[:/\\]+/g, "__").replace(/[^a-zA-Z0-9_.-]/g, "_");
       const outPath = path.join(logsOut, `${fileName}.md`);
       await fs.writeFile(outPath, rendered, "utf8");
       logFilesWritten++;
@@ -1185,7 +1205,7 @@ function firstNonEmptyLine(text: string): string | null {
 }
 
 function stripAnsi(value: string): string {
-  return value.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").replace(/\u001b\][^\u0007]*\u0007/g, "");
+  return value.replace(ANSI_CSI_REGEX, "").replace(ANSI_OSC_REGEX, "");
 }
 
 function extractJsonPayload(text: string): unknown | null {
