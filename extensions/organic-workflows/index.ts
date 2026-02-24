@@ -35,6 +35,14 @@ interface SquashMergeOptions {
   keepBranch: boolean;
 }
 
+interface ParsedSquashMergeArgs {
+  prNumber: number | null;
+  reflectionFocus: string;
+  allowUnresolvedNits: boolean;
+  allowQualityGateChanges: boolean;
+  keepBranch: boolean;
+}
+
 interface PullRequestMeta {
   number: number;
   state: string;
@@ -103,19 +111,28 @@ const ANSI_OSC_REGEX = new RegExp("\\u001b\\][^\\u0007]*\\u0007", "g");
 
 export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
   pi.registerCommand("squash-merge", {
-    description: "Squash-merge a PR after strict readiness checks, then auto-run /reflect",
+    description: "Squash-merge current-branch PR (or explicit PR number) after strict readiness checks, then auto-run /reflect",
     handler: async (args, ctx) => {
       const parsed = parseSquashMergeArgs(args);
-      if (!parsed) {
+      const cwd = ctx.cwd;
+
+      const prNumber = parsed.prNumber ?? (await detectCurrentBranchPrNumber(pi, cwd));
+      if (!prNumber) {
         ctx.ui.notify(
-          "Usage: /squash-merge <pr-number> [reflection focus] [--allow-unresolved-nits] [--allow-quality-gate-changes] [--keep-branch]",
+          "Unable to infer a pull request for the current branch. Usage: /squash-merge [pr-number] [reflection focus] [--allow-unresolved-nits] [--allow-quality-gate-changes] [--keep-branch]",
           "warning"
         );
         return;
       }
 
-      const { prNumber, reflectionFocus } = parsed;
-      const cwd = ctx.cwd;
+      const options: SquashMergeOptions = {
+        prNumber,
+        reflectionFocus: parsed.reflectionFocus,
+        allowUnresolvedNits: parsed.allowUnresolvedNits,
+        allowQualityGateChanges: parsed.allowQualityGateChanges,
+        keepBranch: parsed.keepBranch,
+      };
+      const { reflectionFocus } = options;
 
       const dirty = await pi.exec("git", ["status", "--porcelain"], { cwd });
       if (dirty.stdout.trim().length > 0) {
@@ -126,7 +143,7 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const readiness = await assessPrReadiness(pi, ctx, parsed);
+      const readiness = await assessPrReadiness(pi, ctx, options);
       if (!readiness.meta) {
         ctx.ui.notify(`Failed to load PR #${prNumber}.`, "error");
         return;
@@ -167,7 +184,7 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
       ctx.ui.setStatus("organic-workflows", `Squash-merging PR #${prNumber}...`);
 
       const mergeArgs = ["pr", "merge", String(prNumber), "--squash"];
-      if (!parsed.keepBranch) {
+      if (!options.keepBranch) {
         mergeArgs.push("--delete-branch");
       }
 
@@ -800,6 +817,15 @@ async function detectDefaultBranch(pi: ExtensionAPI, cwd: string): Promise<strin
   return "master";
 }
 
+async function detectCurrentBranchPrNumber(pi: ExtensionAPI, cwd: string): Promise<number | null> {
+  const current = await ghJson<{ number?: number }>(pi, cwd, ["pr", "view", "--json", "number"]);
+  const prNumber = Number(current?.number);
+  if (Number.isInteger(prNumber) && prNumber > 0) {
+    return prNumber;
+  }
+  return null;
+}
+
 async function ghJson<T>(pi: ExtensionAPI, cwd: string, args: string[]): Promise<T | null> {
   const result = await pi.exec("gh", args, { cwd, timeout: 60_000 });
   if (result.code !== 0) {
@@ -1180,27 +1206,37 @@ function dedupe(values: string[]): string[] {
   return Array.from(new Set(values));
 }
 
-function parseSquashMergeArgs(args: string): SquashMergeOptions | null {
+function parseSquashMergeArgs(args: string): ParsedSquashMergeArgs {
   const trimmed = args.trim();
   if (!trimmed) {
-    return null;
+    return {
+      prNumber: null,
+      reflectionFocus: "",
+      allowUnresolvedNits: false,
+      allowQualityGateChanges: false,
+      keepBranch: false,
+    };
   }
 
   const tokens = trimmed.split(/\s+/);
-  const prNumber = Number(tokens[0]);
-  if (!Number.isInteger(prNumber) || prNumber <= 0) {
-    return null;
-  }
-
   const flags = new Set<string>();
-  const focusTokens: string[] = [];
+  const valueTokens: string[] = [];
 
-  for (let i = 1; i < tokens.length; i++) {
-    const token = tokens[i];
+  for (const token of tokens) {
     if (token.startsWith("--")) {
       flags.add(token);
     } else {
-      focusTokens.push(token);
+      valueTokens.push(token);
+    }
+  }
+
+  let prNumber: number | null = null;
+  const focusTokens = [...valueTokens];
+  if (focusTokens.length > 0) {
+    const explicitPr = parsePrNumberToken(focusTokens[0]);
+    if (explicitPr !== null) {
+      prNumber = explicitPr;
+      focusTokens.shift();
     }
   }
 
@@ -1211,6 +1247,20 @@ function parseSquashMergeArgs(args: string): SquashMergeOptions | null {
     allowQualityGateChanges: flags.has("--allow-quality-gate-changes"),
     keepBranch: flags.has("--keep-branch"),
   };
+}
+
+function parsePrNumberToken(token: string): number | null {
+  const normalized = token.startsWith("#") ? token.slice(1) : token;
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const value = Number(normalized);
+  if (!Number.isInteger(value) || value <= 0) {
+    return null;
+  }
+
+  return value;
 }
 
 function getConfigDir(): string {

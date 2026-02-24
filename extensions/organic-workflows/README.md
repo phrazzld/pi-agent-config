@@ -3,6 +3,7 @@
 Opinionated workflow automation for:
 
 1. **`/squash-merge`** (code-enforced)
+   - defaults to the pull request for the current branch (optional explicit PR number still supported)
    - validates strict PR readiness
      - PR open + not draft + merge-ready status
      - CI/CD checks all green (no pending/failing)
