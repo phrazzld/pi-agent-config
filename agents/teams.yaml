@@ -30,3 +30,13 @@ autopilot:
   - reviewer
   - red-team
   - documenter
+
+meta-council:
+  - meta-agent-expert
+  - meta-config-expert
+  - meta-extension-expert
+  - meta-skill-expert
+  - meta-prompt-expert
+  - meta-team-ui-expert
+  - meta-theme-expert
+  - meta-keybindings-expert

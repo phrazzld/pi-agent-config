@@ -20,6 +20,42 @@ plan-critique-build-review:
     - agent: reviewer
       prompt: "Review the implementation for bugs, maintainability, and deployment risk:\n\n$INPUT"
 
+software-delivery-v1:
+  description: "General product engineering flow: plan, critique, build, review, docs"
+  checkpoints:
+    - before-build
+    - before-pr
+  steps:
+    - agent: planner
+      prompt: "Create an execution plan for: $INPUT"
+    - agent: plan-reviewer
+      prompt: "Critique this plan and require risk/test coverage before implementation:\n\n$INPUT\n\nOriginal goal: $ORIGINAL"
+    - agent: worker
+      prompt: "Implement the approved plan with focused scope and verification:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Run blocking review for correctness, maintainability, and risk:\n\n$INPUT"
+    - agent: documenter
+      prompt: "Prepare concise PR-ready summary/docs evidence:\n\n$INPUT"
+
+meta-council-v1:
+  description: "Pi-meta architecture council pass for config, extensions, skills, prompts, and UI"
+  checkpoints:
+    - after-recon
+    - before-implementation
+  steps:
+    - agent: scout
+      prompt: "Map the Pi config areas most relevant to this objective:\n\n$INPUT"
+    - agent: meta-agent-expert
+      prompt: "Evaluate agent role boundaries and handoff quality for this objective:\n\n$INPUT"
+    - agent: meta-config-expert
+      prompt: "Evaluate slice/config topology and global-vs-local responsibilities:\n\n$INPUT"
+    - agent: meta-extension-expert
+      prompt: "Evaluate extension composition and observability design:\n\n$INPUT"
+    - agent: meta-team-ui-expert
+      prompt: "Evaluate team/pipeline UI visibility and operator ergonomics:\n\n$INPUT"
+    - agent: planner
+      prompt: "Synthesize prior findings into a concrete implementation plan:\n\n$INPUT\n\nOriginal goal: $ORIGINAL"
+
 autopilot-v1:
   description: "Bounded issue-to-PR flow with explicit checkpoints"
   checkpoints:
