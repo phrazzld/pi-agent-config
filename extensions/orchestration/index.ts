@@ -11,6 +11,15 @@ import { Type } from "@sinclair/typebox";
 import { discoverAgents, type AgentConfig, type AgentScope } from "../subagent/agents";
 import { loadOrchestrationConfig, type PipelineSpec, type TeamMap, type PipelineMap } from "./config";
 
+const ORCHESTRATION_MESSAGE_TYPE = "orchestration";
+const ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE = "orchestration-synthesis";
+const ORCHESTRATION_WIDGET_PLACEMENT = "aboveEditor" as const;
+const ORCHESTRATION_DASHBOARD_AUTO_CLEAR_MS = 8_000;
+const LOCK_RETRY_MAX_ATTEMPTS = 4;
+const LOCK_RETRY_BASE_DELAY_MS = 120;
+const SYNTHESIS_MAX_OUTPUT_CHARS_PER_MEMBER = 4_000;
+const SYNTHESIS_MAX_TOTAL_CHARS = 28_000;
+
 const TEAM_TOOL_PARAMS = Type.Object({
   team: Type.String({ description: "Team name from agents/teams.yaml" }),
   goal: Type.String({ description: "Goal/task to execute with the team" }),
@@ -42,6 +51,7 @@ interface AgentUsage {
   cost: number;
   contextTokens: number;
   turns: number;
+  toolCalls: number;
 }
 
 interface AgentRunResult {
@@ -81,10 +91,17 @@ interface PipelineExecutionResult {
 export default function orchestrationExtension(pi: ExtensionAPI): void {
   const dashboardKey = "orchestration-dashboard";
   let lastDashboard: DashboardState | null = null;
+  let dashboardClearTimer: ReturnType<typeof setTimeout> | null = null;
 
-  pi.registerMessageRenderer("orchestration", (message, _options, theme) => {
+  pi.registerMessageRenderer(ORCHESTRATION_MESSAGE_TYPE, (message, _options, theme) => {
     const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
     const title = `${theme.fg("toolTitle", theme.bold("orchestration "))}${theme.fg("accent", "result")}`;
+    return new Text(`${title}\n${content}`, 0, 0);
+  });
+
+  pi.registerMessageRenderer(ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE, (message, _options, theme) => {
+    const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
+    const title = `${theme.fg("toolTitle", theme.bold("orchestration "))}${theme.fg("accent", "synthesis")}`;
     return new Text(`${title}\n${content}`, 0, 0);
   });
 
@@ -132,10 +149,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
       const result = await runTeam(pi, ctx, parsed.name, goal, {
         agentScope: parsed.scope,
         concurrency: parsed.concurrency,
-        onDashboardUpdate: (dashboard) => {
-          lastDashboard = dashboard;
-          renderDashboard(ctx, dashboardKey, dashboard);
-        },
+        onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
       });
 
       if (!result) {
@@ -144,11 +158,28 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
 
       const summary = formatTeamSummary(result);
       pi.sendMessage({
-        customType: "orchestration",
+        customType: ORCHESTRATION_MESSAGE_TYPE,
         content: summary,
         display: true,
         details: result,
       });
+
+      scheduleDashboardAutoClear(ctx);
+
+      const synthesis = await synthesizeTeamExecution(ctx, result, parsed.scope);
+      if (synthesis) {
+        pi.sendMessage({
+          customType: ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE,
+          content: synthesis.output,
+          display: true,
+          details: {
+            team: result.team,
+            goal: result.goal,
+            synthesizer: synthesis.agent,
+            usage: synthesis.usage,
+          },
+        });
+      }
     },
   });
 
@@ -169,10 +200,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
 
       const result = await runPipeline(pi, ctx, parsed.name, goal, {
         agentScope: parsed.scope,
-        onDashboardUpdate: (dashboard) => {
-          lastDashboard = dashboard;
-          renderDashboard(ctx, dashboardKey, dashboard);
-        },
+        onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
       });
 
       if (!result) {
@@ -181,11 +209,13 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
 
       const summary = formatPipelineSummary(result);
       pi.sendMessage({
-        customType: "orchestration",
+        customType: ORCHESTRATION_MESSAGE_TYPE,
         content: summary,
         display: true,
         details: result,
       });
+
+      scheduleDashboardAutoClear(ctx);
     },
   });
 
@@ -196,10 +226,42 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
         ctx.ui.notify("No orchestration run yet in this session.", "info");
         return;
       }
+
+      clearDashboardTimer();
       renderDashboard(ctx, dashboardKey, lastDashboard);
       ctx.ui.notify("Refreshed orchestration dashboard.", "info");
     },
   });
+
+  pi.registerCommand("orchestration-clear", {
+    description: "Clear orchestration dashboard widget/status",
+    handler: async (_args, ctx) => {
+      clearDashboardTimer();
+      clearDashboard(ctx, dashboardKey);
+      ctx.ui.notify("Cleared orchestration dashboard.", "info");
+    },
+  });
+
+  function clearDashboardTimer(): void {
+    if (dashboardClearTimer) {
+      clearTimeout(dashboardClearTimer);
+      dashboardClearTimer = null;
+    }
+  }
+
+  function scheduleDashboardAutoClear(ctx: ExtensionContext): void {
+    clearDashboardTimer();
+    dashboardClearTimer = setTimeout(() => {
+      clearDashboard(ctx, dashboardKey);
+      dashboardClearTimer = null;
+    }, ORCHESTRATION_DASHBOARD_AUTO_CLEAR_MS);
+  }
+
+  function onDashboardUpdate(ctx: ExtensionContext, dashboard: DashboardState): void {
+    clearDashboardTimer();
+    lastDashboard = dashboard;
+    renderDashboard(ctx, dashboardKey, dashboard);
+  }
 
   pi.registerTool({
     name: "team_run",
@@ -212,8 +274,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
         concurrency: params.concurrency ?? 4,
         signal,
         onDashboardUpdate: (dashboard) => {
-          lastDashboard = dashboard;
-          renderDashboard(ctx, dashboardKey, dashboard);
+          onDashboardUpdate(ctx, dashboard);
           onUpdate?.({
             content: [{ type: "text", text: summarizeDashboardProgress(dashboard) }],
             details: dashboard,
@@ -228,6 +289,8 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
           isError: true,
         };
       }
+
+      scheduleDashboardAutoClear(ctx);
 
       return {
         content: [{ type: "text", text: formatTeamSummary(result) }],
@@ -254,8 +317,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
         agentScope: (params.agentScope ?? "both") as AgentScope,
         signal,
         onDashboardUpdate: (dashboard) => {
-          lastDashboard = dashboard;
-          renderDashboard(ctx, dashboardKey, dashboard);
+          onDashboardUpdate(ctx, dashboard);
           onUpdate?.({
             content: [{ type: "text", text: summarizeDashboardProgress(dashboard) }],
             details: dashboard,
@@ -271,6 +333,8 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
         };
       }
 
+      scheduleDashboardAutoClear(ctx);
+
       return {
         content: [{ type: "text", text: formatPipelineSummary(result) }],
         details: result,
@@ -285,6 +349,12 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
       );
     },
   });
+
+}
+
+function clearDashboard(ctx: ExtensionContext, widgetKey: string): void {
+  ctx.ui.setWidget(widgetKey, undefined);
+  ctx.ui.setStatus("orchestration", undefined);
 }
 
 function loadConfig(cwd: string): {
@@ -529,7 +599,7 @@ function renderDashboard(ctx: ExtensionContext, widgetKey: string, dashboard: Da
         },
       };
     },
-    { placement: "belowEditor" },
+    { placement: ORCHESTRATION_WIDGET_PLACEMENT },
   );
 
   ctx.ui.setStatus("orchestration", `${dashboard.mode}:${dashboard.name} done=${done}/${dashboard.cards.length} fail=${failed}`);
@@ -603,14 +673,15 @@ function renderCardGrid(cards: AgentRunResult[], width: number, theme: any): str
 
 function renderCard(card: AgentRunResult, width: number, theme: any): string[] {
   const inner = Math.max(12, width - 2);
-  const icon = card.status === "ok" ? "✓" : card.status === "failed" ? "✗" : card.status === "running" ? "●" : "○";
+  const icon = card.status === "ok" ? "✅" : card.status === "failed" ? "❌" : card.status === "running" ? "⏳" : "⏸";
   const statusColor = card.status === "ok" ? "success" : card.status === "failed" ? "error" : card.status === "running" ? "accent" : "dim";
   const statusLabel = card.status === "ok" ? "done" : card.status;
+  const sourceIcon = card.source === "project" ? "📁" : card.source === "user" ? "🧭" : "❔";
 
   const headerRaw = `${card.agent}${card.stepIndex ? ` (#${card.stepIndex})` : ""}`;
-  const statusRaw = `${icon} ${statusLabel} · ${card.source}`;
+  const statusRaw = `${icon} ${statusLabel}  ${sourceIcon} source:${card.source}`;
   const usageRaw = formatUsage(card.usage);
-  const snippetRaw = truncateLine(card.status === "failed" ? card.error || card.output : card.output, 220) || "(no output)";
+  const snippetRaw = truncateLine(card.status === "failed" ? card.error || card.output : card.output, 200) || "(no output)";
 
   const top = theme.fg("borderMuted", `┌${"─".repeat(inner)}┐`);
   const bottom = theme.fg("borderMuted", `└${"─".repeat(inner)}┘`);
@@ -728,7 +799,7 @@ interface RunAgentTaskOptions {
   signal?: AbortSignal;
 }
 
-async function runAgentTask(pi: ExtensionAPI, options: RunAgentTaskOptions): Promise<AgentRunResult> {
+async function runAgentTask(_pi: ExtensionAPI, options: RunAgentTaskOptions): Promise<AgentRunResult> {
   const config = options.agents.find((candidate) => candidate.name === options.agentName);
   if (!config) {
     return {
@@ -741,6 +812,72 @@ async function runAgentTask(pi: ExtensionAPI, options: RunAgentTaskOptions): Pro
     };
   }
 
+  return runAgentTaskWithConfig(config, {
+    task: options.task,
+    cwd: options.cwd,
+    signal: options.signal,
+    maxAttempts: LOCK_RETRY_MAX_ATTEMPTS,
+  });
+}
+
+async function runAgentTaskWithConfig(
+  config: AgentConfig,
+  options: {
+    task: string;
+    cwd: string;
+    signal?: AbortSignal;
+    maxAttempts?: number;
+  },
+): Promise<AgentRunResult> {
+  const maxAttempts = Math.max(1, options.maxAttempts ?? 1);
+  let lastResult: AgentRunResult | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const attemptResult = await runAgentTaskAttempt(config, {
+      task: options.task,
+      cwd: options.cwd,
+      signal: options.signal,
+    });
+
+    lastResult = attemptResult.result;
+
+    const lockIssue = hasLockIssue(attemptResult.stderr, attemptResult.result.error, attemptResult.result.output);
+    const noMeaningfulOutput = !attemptResult.result.output.trim() || attemptResult.result.output === "(no output)";
+    const shouldRetry = lockIssue && (attemptResult.result.status === "failed" || noMeaningfulOutput);
+
+    if (shouldRetry && attempt < maxAttempts) {
+      const delayMs = backoffWithJitterMs(attempt);
+      await sleep(delayMs, options.signal);
+      continue;
+    }
+
+    if (attemptResult.result.status === "ok" && attemptResult.result.error && hasLockIssue(attemptResult.result.error)) {
+      attemptResult.result.error = undefined;
+    }
+
+    return attemptResult.result;
+  }
+
+  return (
+    lastResult ?? {
+      agent: config.name,
+      source: config.source,
+      status: "failed",
+      output: "error: lock contention retries exhausted",
+      error: "lock contention retries exhausted",
+      usage: emptyUsage(),
+    }
+  );
+}
+
+async function runAgentTaskAttempt(
+  config: AgentConfig,
+  options: {
+    task: string;
+    cwd: string;
+    signal?: AbortSignal;
+  },
+): Promise<{ result: AgentRunResult; stderr: string }> {
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   if (config.model) {
     args.push("--model", config.model);
@@ -769,7 +906,7 @@ async function runAgentTask(pi: ExtensionAPI, options: RunAgentTaskOptions): Pro
 
     let aborted = false;
 
-    const exitCode = await new Promise<number>((resolve) => {
+    const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
       const child = spawn("pi", args, {
         cwd: options.cwd,
         stdio: ["ignore", "pipe", "pipe"],
@@ -801,13 +938,13 @@ async function runAgentTask(pi: ExtensionAPI, options: RunAgentTaskOptions): Pro
           result.error = firstNonEmptyLine(stderrBuffer) ?? stderrBuffer.trim();
         }
 
-        resolve(code ?? 0);
+        resolve({ exitCode: code ?? 0, stderr: stderrBuffer });
       });
 
       child.on("error", (error) => {
         result.status = "failed";
         result.error = error.message;
-        resolve(1);
+        resolve({ exitCode: 1, stderr: error.message });
       });
 
       if (options.signal) {
@@ -843,7 +980,7 @@ async function runAgentTask(pi: ExtensionAPI, options: RunAgentTaskOptions): Pro
       result.output = result.error ? `error: ${result.error}` : "(no output)";
     }
 
-    return result;
+    return { result, stderr };
   } finally {
     if (promptDir) {
       rmSync(promptDir, { recursive: true, force: true });
@@ -858,6 +995,12 @@ function applyJsonEvent(line: string, result: AgentRunResult): void {
 
   try {
     const event = JSON.parse(line) as { type?: string; message?: Message };
+
+    if (event.type === "tool_execution_start") {
+      result.usage.toolCalls += 1;
+      return;
+    }
+
     if (event.type !== "message_end" || !event.message) {
       return;
     }
@@ -1021,15 +1164,18 @@ function truncateLine(text: string, maxChars: number): string {
 function formatUsage(usage: AgentUsage): string {
   const parts: string[] = [];
   if (usage.turns > 0) {
-    parts.push(`${usage.turns}t`);
+    parts.push(`🔁 turns:${usage.turns}`);
+  }
+  if (usage.toolCalls > 0) {
+    parts.push(`🛠 tools:${usage.toolCalls}`);
   }
   if (usage.contextTokens > 0) {
-    parts.push(`ctx:${formatTokens(usage.contextTokens)}`);
+    parts.push(`🧠 ctx:${formatTokens(usage.contextTokens)}`);
   }
   if (usage.cost > 0) {
-    parts.push(`$${usage.cost.toFixed(4)}`);
+    parts.push(`💰 $${usage.cost.toFixed(4)}`);
   }
-  return parts.join(" ") || "usage:none";
+  return parts.join("  ") || "usage:none";
 }
 
 function formatTokens(value: number): string {
@@ -1054,7 +1200,162 @@ function emptyUsage(): AgentUsage {
     cost: 0,
     contextTokens: 0,
     turns: 0,
+    toolCalls: 0,
   };
+}
+
+
+async function synthesizeTeamExecution(
+  ctx: ExtensionContext,
+  result: TeamExecutionResult,
+  scope: AgentScope,
+): Promise<AgentRunResult | null> {
+  const membersWithOutput = result.results.filter((entry) => entry.output.trim() || entry.error?.trim());
+  if (membersWithOutput.length === 0) {
+    return null;
+  }
+
+  const discovery = discoverAgents(ctx.cwd, scope);
+  if (discovery.agents.length === 0) {
+    return null;
+  }
+
+  const synthesizer = pickSynthesizerAgent(discovery.agents, membersWithOutput.map((entry) => entry.agent));
+  if (!synthesizer) {
+    return null;
+  }
+
+  const synthesisTask = buildTeamSynthesisTask(result);
+
+  if (ctx.hasUI) {
+    ctx.ui.setStatus("orchestration", `team:${result.team} synthesizing with ${synthesizer.name}...`);
+  }
+
+  const synthesis = await runAgentTaskWithConfig(synthesizer, {
+    task: synthesisTask,
+    cwd: ctx.cwd,
+    maxAttempts: LOCK_RETRY_MAX_ATTEMPTS,
+  });
+
+  if (ctx.hasUI) {
+    ctx.ui.setStatus("orchestration", undefined);
+  }
+
+  if (synthesis.status !== "ok") {
+    if (ctx.hasUI) {
+      ctx.ui.notify(
+        `Team synthesis failed (${synthesizer.name}): ${synthesis.error ?? "unknown error"}`,
+        "warning",
+      );
+    }
+    return null;
+  }
+
+  return synthesis;
+}
+
+function pickSynthesizerAgent(agents: AgentConfig[], memberNames: string[]): AgentConfig | null {
+  const preferred = ["documenter", "planner", "reviewer", ...memberNames];
+  for (const name of preferred) {
+    const found = agents.find((agent) => agent.name === name);
+    if (found) {
+      return found;
+    }
+  }
+  return agents[0] ?? null;
+}
+
+function buildTeamSynthesisTask(result: TeamExecutionResult): string {
+  const sections: string[] = [];
+  let budget = SYNTHESIS_MAX_TOTAL_CHARS;
+
+  for (const entry of result.results) {
+    if (budget <= 0) {
+      break;
+    }
+
+    const bodySource = (entry.status === "failed" ? entry.error || entry.output : entry.output) || "(no output)";
+    const bounded = truncateMultiline(bodySource, Math.min(SYNTHESIS_MAX_OUTPUT_CHARS_PER_MEMBER, budget));
+    budget -= bounded.length;
+
+    sections.push(`### ${entry.agent} [${entry.status}]
+${bounded}`);
+  }
+
+  return [
+    `Team: ${result.team}`,
+    `Goal: ${result.goal}`,
+    "",
+    "You are synthesizing outputs from all team members for the human operator.",
+    "Requirements:",
+    "- Read every member section below before deciding.",
+    "- Call out cross-member consensus and disagreements explicitly.",
+    "- Mention failed members and the confidence impact.",
+    "- Keep the synthesis concise and action-oriented.",
+    "",
+    "Output format:",
+    "## Synthesis",
+    "## Key Agreements",
+    "## Open Questions / Risks",
+    "## Recommended Next Actions",
+    "",
+    "Member outputs:",
+    sections.join("\n\n"),
+  ].join("\n");
+}
+
+function truncateMultiline(text: string, maxChars: number): string {
+  const normalized = (text || "").trim();
+  if (!normalized) {
+    return "(no output)";
+  }
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
+}
+
+function hasLockIssue(...values: Array<string | undefined>): boolean {
+  const joined = values.filter(Boolean).join("\n");
+  if (!joined) {
+    return false;
+  }
+  return /lock file is already being held|elocked/i.test(joined);
+}
+
+function backoffWithJitterMs(attempt: number): number {
+  const exp = Math.max(0, attempt - 1);
+  const base = LOCK_RETRY_BASE_DELAY_MS * 2 ** exp;
+  const jitter = Math.floor(Math.random() * LOCK_RETRY_BASE_DELAY_MS);
+  return Math.min(2_000, base + jitter);
+}
+
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      if (signal) {
+        signal.removeEventListener("abort", onAbort);
+      }
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+  });
 }
 
 function resolveRuntimePath(token: string, cwd: string): string {

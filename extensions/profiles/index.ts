@@ -24,19 +24,19 @@ const PROFILES: Record<ProfileName, Profile> = {
     thinking: "xhigh",
     tools: ["read", "bash", "grep", "find", "ls", "web_search"],
     instructions:
-      "Mode: ultrathink. Prioritize deep analysis, architecture quality, and risk surfacing before coding.",
+      "Mode: ultrathink. Prioritize deep analysis, architecture quality, and risk surfacing before coding. Use teams/subagents at your discretion when work is non-trivial, cross-functional, or ambiguous; skip orchestration for trivial factual asks or tiny edits. For meta/config architecture work, proactively invoke team_run for meta-council, then synthesize into a concise recommendation. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
   },
   execute: {
     thinking: "medium",
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search"],
     instructions:
-      "Mode: execute. Deliver requested changes with focused scope, direct implementation, and concise verification.",
+      "Mode: execute. Deliver requested changes with focused scope, direct implementation, and concise verification. Use teams/subagents opportunistically for non-trivial multi-step work, risky changes, or when parallel specialist analysis improves quality; avoid orchestration overhead for tiny edits. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
   },
   ship: {
     thinking: "high",
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search"],
     instructions:
-      "Mode: ship. Complete work end-to-end, run checks, and leave PR-ready output with explicit residual risk.",
+      "Mode: ship. Complete work end-to-end, run checks, and leave PR-ready output with explicit residual risk. Prefer team/pipeline orchestration for substantial work that benefits from planning/review/specialists; keep direct execution for straightforward small tasks. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
   },
   fast: {
     thinking: "low",
