@@ -10,36 +10,45 @@ QMD is a local hybrid retrieval engine for markdown-like corpora with:
 - optional LLM reranking
 - JSON/files-oriented outputs suitable for agent workflows
 
-For our use case, this can index exported session-derived markdown + logs + docs and support reflection retrieval without external SaaS dependencies.
+For our use case, this indexes session-derived markdown + logs and supports reflection/planning retrieval without external SaaS dependencies.
 
-## Potential fit in this repo
+## Current implementation status
 
-### Candidate ingestion set
-- Session excerpts (from `~/.pi/agent/sessions/*.jsonl`, transformed into markdown chunks)
-- Operational logs (e.g., extension logs)
-- Repository docs and design notes
+Implemented in `extensions/organic-workflows`:
 
-### Candidate retrieval commands
-- memory keyword search (fast)
-- memory semantic search (fuzzy concept recall)
-- hybrid query for reflection runs
+- `memory_ingest` tool + `/memory-ingest` command
+- `memory_search` tool + `/memory-search` command
+- `memory_context` tool + `/memory-context` command
+- dual-scope corpus model:
+  - **global**: cross-repo memory collection
+  - **local**: repo-scoped memory collection
+- local-first search/ranking when `scope=both`
+- session/log excerpt export to markdown corpus
+- QMD collection bootstrap + update flow
+
+## Scope model
+
+- `scope=local`: bias hard toward current repository memory
+- `scope=global`: use only cross-repo memory
+- `scope=both`: search local first and blend global fallback hits
 
 ## Risks / caveats
 
-- Requires a local indexing pipeline from JSONL session files to Markdown docs
-- Needs ongoing ingestion/refresh automation
-- Additional local model/runtime dependencies
+- Local scope quality depends on session `cwd` metadata quality.
+- Some logs are not repo-attributed; local log inclusion is best-effort.
+- Hybrid search quality improves when embeddings are generated (`qmd embed`).
 
-## Current prototype status
+## Operational guidance
 
-Implemented in `extensions/organic-workflows`:
-- `memory_ingest` tool + `/memory-ingest` command
-- `memory_search` tool + `/memory-search` command
-- Session/log excerpt export to Markdown corpus
-- QMD collection bootstrap + update flow
+1. Bootstrap memory in a repo:
+   - `/memory-ingest --scope both --force`
+2. During planning/review:
+   - `/memory-search --scope local "<topic>"`
+3. Before complex implementation/review responses:
+   - `/memory-context --scope both "<goal>"`
 
 ## Proposed next steps
 
-1. **Toe-dip**: install QMD locally and validate retrieval quality on recent sessions.
-2. **Pilot**: run `/reflect` with memory tools enabled and compare recommendation quality.
-3. **Scale**: refine ingestion schema + retention rules and optionally add embeddings cadence.
+1. Add periodic ingest cadence in bootstrap/local workflow docs.
+2. Validate retrieval quality on real issue-to-PR loops.
+3. Tune local/global weighting (`PI_MEMORY_LOCAL_PRIORITY_BOOST`) based on false-positive rate.

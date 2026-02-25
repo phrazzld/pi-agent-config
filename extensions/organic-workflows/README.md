@@ -14,11 +14,20 @@ Opinionated workflow automation for:
    - switches/pulls default branch
    - automatically triggers `/reflect ...`
 
-2. **Local-first memory prototype (QMD-backed)**
-   - `memory_ingest` tool + `/memory-ingest` command
-   - `memory_search` tool + `/memory-search` command
-   - exports Pi session/log excerpts to markdown corpus
-   - indexes corpus with QMD collection (`pi-memory` by default)
+2. **Local-first memory (QMD-backed)**
+   - tools:
+     - `memory_ingest`
+     - `memory_search`
+     - `memory_context`
+   - commands:
+     - `/memory-ingest`
+     - `/memory-search`
+     - `/memory-context`
+   - maintains two memory scopes:
+     - `local`: repo-scoped corpus + collection
+     - `global`: cross-repo corpus + collection
+   - `scope=both` runs local-first with global fallback
+   - exports Pi session/log excerpts to markdown corpus and indexes via QMD
 
 ## `/squash-merge` override flags
 
@@ -38,16 +47,29 @@ npm install -g @tobilu/qmd
 bun install -g @tobilu/qmd
 ```
 
-Then run:
+Then prime memory:
 
 ```bash
-/memory-ingest --force
+/memory-ingest --scope both --force
+```
+
+## Example memory flows
+
+```bash
+/memory-search --scope local "onboarding fallback path"
+/memory-search --scope both "reviewer concern around checkout docs"
+/memory-context --scope both "current PR risks and prior fixes"
 ```
 
 ## Environment knobs
 
-- `PI_MEMORY_QMD_COLLECTION` (default: `pi-memory`)
+- `PI_MEMORY_GLOBAL_COLLECTION` (default: `pi-memory`)
+- `PI_MEMORY_QMD_COLLECTION` (legacy alias for global collection)
+- `PI_MEMORY_LOCAL_COLLECTION` (optional explicit local collection name/template)
+- `PI_MEMORY_LOCAL_COLLECTION_TEMPLATE` (default: `pi-memory-local-{repo}`)
 - `PI_MEMORY_CORPUS_DIR` (default: `~/.pi/agent/cache/memory-corpus`)
 - `PI_MEMORY_SESSION_LIMIT` (default: `40`)
+- `PI_MEMORY_LOCAL_SESSION_LIMIT` (default: `80`)
 - `PI_MEMORY_MAX_CHARS_PER_SESSION` (default: `120000`)
 - `PI_MEMORY_SYNC_TTL_MS` (default: `600000`)
+- `PI_MEMORY_LOCAL_PRIORITY_BOOST` (default: `0.15`)

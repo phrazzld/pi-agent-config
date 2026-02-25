@@ -31,7 +31,8 @@ Always evaluate both:
 2. **Memory evidence (local-first)**
    - Session JSONL (`~/.pi/agent/sessions/...`)
    - Runtime logs (`~/.pi/agent/logs/...`)
-   - If available, run `memory_ingest` + `memory_search` before broad research
+   - If available, run `memory_ingest` + `memory_search` (or `memory_context`) before broad research
+   - Use `scope=both` and explicitly prioritize local findings over global fallback
 
 3. **Config source context**
    - Existing repo assets (`prompts/`, `skills/`, `extensions/`, `docs/`)

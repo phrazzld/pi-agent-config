@@ -45,7 +45,8 @@ Run a structured reflection loop that:
    - Capture repeated manual orchestration and decision bottlenecks.
 
 2. **Memory lane (local-first)**
-   - If `memory_ingest` / `memory_search` tools are available, use them first.
+   - If `memory_ingest` / `memory_search` / `memory_context` tools are available, use them first.
+   - Ingest/search with explicit local-first scope (`scope=both`, then prioritize local findings in synthesis).
    - Prefer raw transcript excerpts + derived summaries/metadata (not summaries only).
 
 3. **Cross-config lane**
