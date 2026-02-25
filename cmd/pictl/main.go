@@ -154,8 +154,11 @@ func printUsage(out *os.File) {
 	fmt.Fprintln(out, "Examples:")
 	fmt.Fprintln(out, "  pictl meta")
 	fmt.Fprintln(out, "  pictl research --profile meta")
+	fmt.Fprintln(out, "  pictl build --profile execute")
+	fmt.Fprintln(out, "  pictl autopilot")
+	fmt.Fprintln(out, "  pictl daybook")
 	fmt.Fprintln(out, "  pictl slice pi-dev --profile meta")
-	fmt.Fprintln(out, "  pictl delivery -- --model openai-codex/gpt-5.3-codex")
+	fmt.Fprintln(out, "  pictl build -- --model openai-codex/gpt-5.3-codex")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Targets:")
 	for _, target := range controlplane.CanonicalTargets() {

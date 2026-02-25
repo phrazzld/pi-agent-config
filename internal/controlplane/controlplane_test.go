@@ -16,6 +16,32 @@ func TestResolveTargetAlias(t *testing.T) {
 	}
 }
 
+func TestResolveTargetNewAliases(t *testing.T) {
+	target, ok := ResolveTarget("journal")
+	if !ok {
+		t.Fatalf("expected journal alias to resolve")
+	}
+	if target.Name != "daybook" {
+		t.Fatalf("expected daybook target, got %q", target.Name)
+	}
+
+	target, ok = ResolveTarget("devflow")
+	if !ok {
+		t.Fatalf("expected devflow alias to resolve")
+	}
+	if target.Name != "build" {
+		t.Fatalf("expected build target, got %q", target.Name)
+	}
+
+	target, ok = ResolveTarget("ship")
+	if !ok {
+		t.Fatalf("expected ship alias to resolve")
+	}
+	if target.Name != "autopilot" {
+		t.Fatalf("expected autopilot target, got %q", target.Name)
+	}
+}
+
 func TestHasProfileFlag(t *testing.T) {
 	if !HasProfileFlag([]string{"--profile", "meta"}) {
 		t.Fatalf("expected --profile flag detection")
