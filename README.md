@@ -16,6 +16,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `slices/`: capability slice manifests for narrow runtime composition
 - `docs/`: provider docs and policy
 - `scripts/`: bootstrap/sync scripts and test helpers
+- `context/global/AGENTS.md`: cross-repo baseline context synced to `~/.pi/agent/AGENTS.md`
 
 ## Included Runtime Extensions
 - `extensions/web-search`: `web_search` tool + `/web*` commands
@@ -78,8 +79,12 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 ./scripts/bootstrap.sh
 ```
 
+This links runtime assets and `~/.pi/agent/AGENTS.md` (global baseline context).
+
 ## Discovery Hygiene Defaults
 - Home-level `CLAUDE.md` is retired (avoid broad machine context bleed into every repo).
+- Global cross-repo context lives in `~/.pi/agent/AGENTS.md` (managed from `context/global/AGENTS.md`).
+- Repo root `AGENTS.md` files remain repo-specific and should not carry machine-global policy.
 - Global `~/.agents/skills/*` auto-discovery is disabled by default via `settings.json`.
 - Keep global runtime focused; opt into extra skills per repository via `.pi/settings.json`.
 

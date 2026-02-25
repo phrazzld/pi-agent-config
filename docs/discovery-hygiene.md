@@ -18,6 +18,18 @@ Current global setting in this repo (machine-specific home path):
 }
 ```
 
+
+## Context file layering policy
+
+- Global baseline context: `~/.pi/agent/AGENTS.md` (managed from `context/global/AGENTS.md` in this repo).
+- Repo-specific guidance: `<repo>/AGENTS.md`.
+- Keep these concerns separate:
+  - global file = cross-repo defaults only
+  - repo file = local workflow/conventions only
+
+Pi loads global context first, then parent-directory context files down to the current repo.
+So repo-local `AGENTS.md` should refine/override global defaults when needed.
+
 ## Repo-local opt-in (recommended)
 
 When a specific repo needs one of those skills, opt in explicitly in that repo’s `.pi/settings.json`:

@@ -2,17 +2,18 @@
 
 Repository-specific guidance when working **inside** `pi-agent-config`.
 
+## Scope guardrail
+
+This file is **repo-local only**.
+Do not use it as the global baseline for all Pi sessions.
+
+Global cross-repo context belongs in:
+- `context/global/AGENTS.md` (synced to `~/.pi/agent/AGENTS.md` by `scripts/bootstrap.sh`)
+
 ## Purpose
 
 This repo is the source-of-truth for global Pi runtime config (`~/.pi/agent`).
 Changes here affect behavior across many repositories.
-
-
-## Operating philosophy
-
-- Prefer **convention over configuration**: choose one clear default path unless a real need proves otherwise.
-- Favor **small, focused, composable primitives** (Unix philosophy) over monolithic workflow blobs.
-- Remove stale flags/options once a better default is known.
 
 ## Local vs Global policy
 
@@ -43,4 +44,4 @@ When editing:
 
 1. This file (`AGENTS.md`) for repo-specific behavior.
 2. `README.md` + `docs/discovery-hygiene.md` for composition policy.
-3. Global machine context only as fallback.
+3. Global machine context as fallback (`~/.pi/agent/AGENTS.md`).
