@@ -1,0 +1,11 @@
+{
+  "description": "Charisma-first one-on-one journaling slice with selective retrieval and memory tools.",
+  "defaultProfile": "fast",
+  "extensions": [
+    "extensions/profiles/index.ts",
+    "extensions/web-search/index.ts",
+    "extensions/organic-workflows/index.ts",
+    "extensions/daybook/index.ts",
+    "extensions/visibility/index.ts"
+  ]
+}
