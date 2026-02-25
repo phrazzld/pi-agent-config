@@ -10,10 +10,10 @@ Build a world-class, explicit Pi configuration system with:
 
 1. maximum primitive visibility (status/TUI + logs),
 2. explicit orchestration (skills/agents/teams/pipelines/extensions),
-3. workflow-first control plane (`meta`, `build`, `autopilot`, `research`, `daybook`),
+3. workflow-first control plane (`meta`, `build`, `autopilot`, `research`, `daybook`, `ops`),
 4. intelligent repo bootstrap that synthesizes repo-local `.pi` foundations.
 
-## Session Snapshot (2026-02-24)
+## Session Snapshot (2026-02-25)
 
 ### Landed
 
@@ -23,20 +23,26 @@ Build a world-class, explicit Pi configuration system with:
 - [x] Orchestration extension added (`/teams`, `/pipelines`, `/team`, `/pipeline`, dashboard UI).
 - [x] Daybook extension + slice added (charisma-first posture).
 - [x] Intelligent bootstrap extension upgraded (`/bootstrap-repo` multi-lane synthesis + report).
-- [x] Control plane simplified to 5 targets (`meta/build/autopilot/research/daybook`).
+- [x] Control plane expanded to 6 targets (`meta/build/autopilot/research/daybook/ops`).
 - [x] Orchestration now resolves repo-local `.pi/agents/{teams,pipelines}.yaml` first.
 - [x] Adaptive orchestration governor v1 shipped (progress scoring + observe/warn/enforce + loop/retry/budget/fuse tripwires).
+- [x] Sysadmin reliability stack shipped: `handoff`, `ops-watchdog`, `sysadmin` slice, and `pictl ops` target.
+- [x] Orchestration admission control shipped (run/slot/depth caps + fail-closed breaker + runtime status commands).
+- [x] Nested non-interactive `pi` recursion blocked by guardrails by default.
+- [x] Log-growth controls shipped: bounded NDJSON rotation for watchdog/handoff/admission/visibility/governance/web-search.
+- [x] Host watchdog automation scripts landed (LaunchAgent installer + rotating log retention).
 
 ### Still Open
 
-- [ ] Weekly rollup/aggregation over visibility telemetry NDJSON.
-- [ ] Calibrate adaptive governor thresholds from telemetry and decide when to default to `enforce`.
-- [ ] Daybook model bakeoff automation (currently documented only).
-- [ ] Consolidated commit pass for current large working tree.
+- [ ] Soak-test admission controller and tune rejection thresholds from real telemetry.
+- [ ] Add orchestration idempotency/dedup guard for repeated identical requests.
+- [ ] Tighten governor defaults (`enforce` where justified) with lower-latency checks for runaway detection.
+- [ ] Add weekly telemetry rollup/aggregation over bounded NDJSON logs.
+- [ ] Define and ship an opinionated Pi framework layer (stable defaults + extension contracts + upgrade lane).
 
 ## Restart Checklist (next session)
 
-1. `pictl list` (confirm 5 workflow targets)
+1. `pictl list` (confirm 6 workflow targets, including `ops`)
 2. `pictl meta`
 3. `/bootstrap-repo --domain <repo>` in each active product repository
 4. Exit, relaunch per repo with `pictl build`
@@ -46,10 +52,11 @@ Build a world-class, explicit Pi configuration system with:
 
 ### Now
 
-- [ ] Add weekly telemetry rollup command for `~/.pi/agent/logs/primitive-usage.ndjson`.
-- [ ] Tune adaptive governor scoring/thresholds on real runs and tighten false-positive controls.
+- [ ] Run 24h mixed-workload soak with admission state + breaker telemetry review.
+- [ ] Add idempotency key + dedup in orchestration admission path.
+- [ ] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.
+- [ ] Add top-level-only telemetry mode for heavy extensions during delegated depth (`PI_ORCH_DEPTH > 0`).
 - [ ] Tighten bootstrap ambition checkpoint scoring and add consensus-quality validation on generated artifacts.
-- [ ] Run bootstrap across active repos and capture deltas in per-repo notes.
 
 ### Next
 
@@ -63,6 +70,25 @@ Build a world-class, explicit Pi configuration system with:
 - [ ] Prospecting + outreach flywheel for SMB website/software opportunities.
 - [ ] Automated business dossier + branded outreach artifact generation pipeline.
 - [ ] Optional multi-tenant artifact hosting (e.g. `<target>.mistystep.io`) for demos.
+
+## Platform Direction — Opinionated Pi Framework (proposal)
+
+Goal: evolve `pi-agent-config` from loose config pack into a stable, opinionated framework on top of bare Pi core.
+
+### v1 framework pillars
+
+1. **Stable defaults**: safety-first baseline extensions, bounded orchestration, bounded logging, and explicit profiles.
+2. **Composable packs**: workflow slices (`meta/build/autopilot/research/daybook/ops`) as first-class capability bundles.
+3. **Contracted extension APIs**: small, documented extension contracts with runtime invariants and smoke tests.
+4. **Operational UX**: one-command launch (`pictl <target>`), clear status commands, and failure-mode playbooks.
+5. **Upgrade lane**: predictable migration path for settings/slices/extensions across versions.
+
+### Candidate deliverables
+
+- framework manifest/version stamp (`framework.json`) with compatibility checks
+- opinionated "distribution" docs and bootstrap command for new machines/repos
+- stability test matrix (admission, watchdog, nested orchestration, log retention)
+- extension quality bar checklist (timeouts, bounded concurrency, telemetry budget)
 
 ## Workflow Seed A — Autonomous Autopilot Flywheel
 
