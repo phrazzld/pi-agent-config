@@ -43,6 +43,12 @@ For any GitHub write operation (PR create/edit/comment, issue comment, review re
 2. Use `--body-file/-F` (never `--body/-b`).
 3. Fetch back the posted content and confirm formatting quality.
 
+## Definition of done
+
+- A pull request exists for the current branch (created or updated during this run).
+- The response includes: `PR URL: <url>`.
+- If creation/edit fails, report exact blocker and stop as blocked (not done).
+
 ## Post-create sanity check
 
 After creating/updating PR:

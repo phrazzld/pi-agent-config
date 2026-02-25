@@ -61,6 +61,8 @@ interface GuardrailsState {
   prLintQueued: boolean;
   queuedPrCommand: string | null;
   approvedExternalScopes: Set<string>;
+  prPromptPendingVerification: boolean;
+  prPromptAutoReminderSent: boolean;
 }
 
 interface PullRequestMeta {
@@ -109,6 +111,8 @@ export default function guardrailsExtension(pi: ExtensionAPI): void {
     prLintQueued: false,
     queuedPrCommand: null,
     approvedExternalScopes: new Set<string>(),
+    prPromptPendingVerification: false,
+    prPromptAutoReminderSent: false,
   };
 
   pi.on("tool_call", async (event, ctx) => {
@@ -209,6 +213,65 @@ export default function guardrailsExtension(pi: ExtensionAPI): void {
     return undefined;
   });
 
+  pi.on("input", async (event) => {
+    if (event.source === "extension") {
+      return { action: "continue" };
+    }
+
+    if (isPrTemplateInvocation(event.text)) {
+      state.prPromptPendingVerification = true;
+      state.prPromptAutoReminderSent = false;
+    }
+
+    return { action: "continue" };
+  });
+
+  pi.on("before_agent_start", async (event) => {
+    if (!state.prPromptPendingVerification) {
+      return undefined;
+    }
+
+    return {
+      systemPrompt:
+        `${event.systemPrompt}\n\n` +
+        "PR completion gate (non-negotiable): This /pr flow is not complete until a pull request exists for the current branch. If a PR does not exist, create one now with GitHub CLI using --body-file (never inline --body). In your final response, include a line `PR URL: <url>`. Verify existence before claiming completion.",
+    };
+  });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    if (!state.prPromptPendingVerification) {
+      return;
+    }
+
+    const prStatus = await findPrForCurrentBranch(pi, ctx.cwd);
+    if (prStatus.found && prStatus.url) {
+      state.prPromptPendingVerification = false;
+      state.prPromptAutoReminderSent = false;
+      if (ctx.hasUI) {
+        ctx.ui.notify(
+          `Guardrails: PR gate satisfied (${prStatus.url}).`,
+          "success",
+        );
+      }
+      return;
+    }
+
+    if (!state.prPromptAutoReminderSent) {
+      state.prPromptAutoReminderSent = true;
+      pi.sendUserMessage(
+        "PR guard: A pull request for the current branch is still missing. Create it now using `gh pr create --body-file <path>` (or update existing with `gh pr edit --body-file <path>`), then report `PR URL: ...`.",
+      );
+      return;
+    }
+
+    if (ctx.hasUI) {
+      const detail = prStatus.branch
+        ? `No PR found for branch ${prStatus.branch}.`
+        : "No PR found for current branch.";
+      ctx.ui.notify(`Guardrails: ${detail}`, "warning");
+    }
+  });
+
   pi.on("tool_result", async (event, ctx) => {
     if (event.isError) {
       return undefined;
@@ -242,6 +305,7 @@ export default function guardrailsExtension(pi: ExtensionAPI): void {
         `- Auto-fix malformed PR title/body: ${PR_METADATA_AUTOFIX}`,
         `- PR title max chars: ${PR_TITLE_MAX_CHARS}`,
         `- PR governance log: ${getPrGovernanceLogPath()}`,
+        "- /pr completion gate verifies PR exists for current branch before completion",
         "",
         "Repository scope policy:",
         `- External path confirmation required: ${EXTERNAL_SCOPE_GUARD}`,
@@ -795,6 +859,70 @@ function directoryForPath(targetPath: string): string {
 
 function dedupe(values: string[]): string[] {
   return Array.from(new Set(values));
+}
+
+function isPrTemplateInvocation(text: string): boolean {
+  const trimmed = text.trim();
+  return /^\/pr(?:\s|$)/.test(trimmed);
+}
+
+async function findPrForCurrentBranch(
+  pi: ExtensionAPI,
+  cwd: string,
+): Promise<{ found: boolean; url?: string; branch?: string }> {
+  const branchResult = await pi.exec("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd,
+    timeout: 10_000,
+  });
+
+  if (branchResult.code !== 0) {
+    return { found: false };
+  }
+
+  const branch = branchResult.stdout.trim();
+  if (!branch) {
+    return { found: false };
+  }
+
+  const prListResult = await pi.exec(
+    "gh",
+    [
+      "pr",
+      "list",
+      "--head",
+      branch,
+      "--state",
+      "all",
+      "--limit",
+      "1",
+      "--json",
+      "url,state",
+    ],
+    {
+      cwd,
+      timeout: 15_000,
+    },
+  );
+
+  if (prListResult.code !== 0) {
+    return { found: false, branch };
+  }
+
+  try {
+    const parsed = JSON.parse(prListResult.stdout) as Array<{
+      url?: string;
+      state?: string;
+    }>;
+
+    const item = parsed.find((entry) => Boolean(entry.url));
+    if (!item?.url) {
+      return { found: false, branch };
+    }
+
+    return { found: true, url: item.url, branch };
+  } catch {
+    return { found: false, branch };
+  }
 }
 
 function evaluatePullRequestCommandSafety(command: string): {

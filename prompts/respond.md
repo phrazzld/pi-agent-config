@@ -46,6 +46,8 @@ Every GitHub comment/reply must be:
 6. **Reply on GitHub with high-quality formatting**
    - inline reply for line comments where possible
    - PR-level comment for outside-diff feedback
+   - write reply text to a temp markdown file first
+   - use `--body-file/-F` for GitHub CLI write operations (never inline `--body/-b`)
    - use this exact structure:
      - `Classification: <bug|risk|style|question>`
      - `Severity: <critical|high|medium|low>`

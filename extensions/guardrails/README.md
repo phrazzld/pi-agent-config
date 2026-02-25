@@ -8,6 +8,9 @@ Adds:
   - blocks inline GitHub write bodies (`gh pr|issue ... --body/-b`) and requires `--body-file/-F`
   - auto-lints and auto-fixes malformed PR title/body after successful PR create/edit
   - strips escaped newlines / log-noise artifacts from PR descriptions
+- `/pr` completion gate:
+  - when `/pr` is invoked, guardrails verifies a PR exists for the current branch before treating flow as complete
+  - if missing, injects a follow-up instruction to create/update PR and report URL
 - repository scope guardrail:
   - read/write/edit and `bash` commands that `cd` outside the current cwd require explicit confirmation
   - approvals are remembered per external repo scope for the current session
