@@ -24,9 +24,9 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `extensions/organic-workflows`: code-enforced `/squash-merge` + high/critical review finding merge gate + local-first QMD memory ingest/search
 - `extensions/subagent`: `subagent` delegation tool (single, parallel, chain) with user/project agent scopes
 - `extensions/orchestration`: `/team` + `/pipeline` execution over declarative `agents/teams.yaml` and `agents/pipelines.yaml` with live dashboard UI
-- `extensions/visibility`: maximum-visibility primitive instrumentation (status/widget + end-of-run summaries + NDJSON logs)
+- `extensions/visibility`: runtime visibility instrumentation (single-row footer + optional widget + NDJSON logs)
 - `extensions/daybook`: charisma-first one-on-one journaling posture with tone controls
-- `extensions/bootstrap`: intelligent `/bootstrap-repo` primitive (multi-model reconnaissance + synthesis) for repo-local `.pi/` foundations
+- `extensions/bootstrap`: intelligent `/bootstrap-repo` primitive (autonomous multi-lane exploration + synthesis) for repo-local `.pi/` foundations
 
 ## Included Skills
 - `skills/web-search`: retrieval-first web research workflow and output contract
@@ -37,6 +37,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `skills/prompt-context-engineering`: latency-first prompt/context design patterns for production agents
 - `skills/llm-communication`: goal-oriented prompt/agent instruction patterns
 - `skills/skill-builder`: proactive extraction of reusable workflows into skills
+- `skills/agentic-bootstrap`: synthesis-first repository bootstrap design patterns (model routing + success-criteria-driven artifacts)
 
 ## Included Workflow Prompts
 - `/execute`
@@ -44,6 +45,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `/architect`
 - `/pr`
 - `/respond`
+- `/ship-branch`
 - `/polish`
 - `/fix-ci`
 - `/groom`
@@ -56,6 +58,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `/squash-merge`
 - `/memory-ingest`
 - `/memory-search`
+- `/memory-context`
 - `/pr-lint`
 - `/pr-trends`
 - `/review-policy`
@@ -151,10 +154,12 @@ See:
 - `docs/prospecting-flywheel.md`
 - `docs/session-handoff-2026-02-24.md`
 
-Optional (QMD local-memory prototype):
+Optional (QMD local-memory workflow):
 ```bash
 ./scripts/setup-qmd.sh
-/memory-ingest --force
+/memory-ingest --scope both --force
+/memory-search --scope local "current repo conventions"
+/memory-context --scope both "active task + likely failure modes"
 ```
 
 ## Required Env
@@ -166,12 +171,17 @@ Core retrieval keys:
 - `BRAVE_API_KEY` (fallback retrieval)
 - `PERPLEXITY_API_KEY` (optional synthesis)
 
-Optional local-memory knobs (QMD prototype):
-- `PI_MEMORY_QMD_COLLECTION` (default: `pi-memory`)
+Optional local-memory knobs (QMD):
+- `PI_MEMORY_GLOBAL_COLLECTION` (default: `pi-memory`)
+- `PI_MEMORY_QMD_COLLECTION` (legacy alias for global collection)
+- `PI_MEMORY_LOCAL_COLLECTION` (optional explicit local collection name/template)
+- `PI_MEMORY_LOCAL_COLLECTION_TEMPLATE` (default: `pi-memory-local-{repo}`)
 - `PI_MEMORY_CORPUS_DIR` (default: `~/.pi/agent/cache/memory-corpus`)
-- `PI_MEMORY_SESSION_LIMIT`
+- `PI_MEMORY_SESSION_LIMIT` (default: `40`)
+- `PI_MEMORY_LOCAL_SESSION_LIMIT` (default: `80`)
 - `PI_MEMORY_MAX_CHARS_PER_SESSION`
 - `PI_MEMORY_SYNC_TTL_MS`
+- `PI_MEMORY_LOCAL_PRIORITY_BOOST` (default: `0.15`)
 
 ## Extension Tests (lightweight harness)
 ```bash

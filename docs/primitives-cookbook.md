@@ -50,7 +50,7 @@ Run example:
 - Commands:
   - `/visibility`
   - `/visibility-reset`
-- End-of-run summary emitted after every agent run
+- End-of-run summary support is available (disabled by default)
 - Logs: `~/.pi/agent/logs/primitive-usage.ndjson`
 
 ## Daybook posture
@@ -64,12 +64,33 @@ Run example:
 ## Bootstrap pattern (meta -> repo-local)
 
 - Doc: `docs/repo-bootstrap-workflow.md`
-- Run `pictl meta` in target repo once to scaffold `.pi/`, then switch to `pictl build` (or repo-local domain slice).
+- Use sequence:
+  1. `/bootstrap-plan` (planning/recon only)
+  2. `/bootstrap-repo --domain <repo-domain>` (apply/scaffold)
+  3. `/memory-ingest --scope both --force` (prime local-first memory)
+  4. switch to repo execution profile (`pictl build`)
 
 ## Bootstrap primitive
 
 - Extension command: `/bootstrap-repo` (from `extensions/bootstrap`)
 - Tool: `bootstrap_repo`
-- Default mode is intelligent: multi-model lanes + synthesis
+- Default mode is intelligent: multi-lane exploration + synthesis
+- Optional deep mode: `/bootstrap-repo --max`
 - Optional fast mode: `/bootstrap-repo --quick`
-- Planning prompt (optional): `prompts/bootstrap-plan.md`
+- Planning prompt (non-writing): `prompts/bootstrap-plan.md`
+
+## Memory primitives
+
+- Extension: `extensions/organic-workflows/index.ts`
+- Tools:
+  - `memory_ingest`
+  - `memory_search`
+  - `memory_context`
+- Commands:
+  - `/memory-ingest`
+  - `/memory-search`
+  - `/memory-context`
+- Scope model:
+  - `local` = repo-scoped memory
+  - `global` = cross-repo memory
+  - `both` = local-first + global fallback
