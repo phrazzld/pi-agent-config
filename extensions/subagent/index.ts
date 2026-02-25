@@ -17,6 +17,12 @@ import {
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_PARALLEL_CONCURRENCY = 4;
+const DEFAULT_MAX_TURNS = 80;
+const DEFAULT_MAX_RUNTIME_SECONDS = 600;
+const MIN_MAX_TURNS = 5;
+const MAX_MAX_TURNS = 500;
+const MIN_MAX_RUNTIME_SECONDS = 15;
+const MAX_MAX_RUNTIME_SECONDS = 7_200;
 
 interface UsageStats {
   input: number;
@@ -37,9 +43,23 @@ interface SingleResult {
   stderr: string;
   usage: UsageStats;
   model?: string;
+  configuredModel?: string;
+  configuredTools?: string[];
   stopReason?: string;
   errorMessage?: string;
   step?: number;
+  startedAtMs: number;
+  lastUpdateAtMs: number;
+  elapsedMs: number;
+  toolCallCount: number;
+  lastAction?: string;
+  maxTurns?: number;
+  maxRuntimeSeconds?: number;
+}
+
+interface GuardrailBudget {
+  maxTurns: number;
+  maxRuntimeSeconds: number;
 }
 
 interface SubagentDetails {
@@ -57,12 +77,16 @@ const TaskItem = Type.Object({
   agent: Type.String({ description: "Name of the agent to invoke" }),
   task: Type.String({ description: "Task to delegate to the agent" }),
   cwd: Type.Optional(Type.String({ description: "Working directory for this delegated run" })),
+  maxTurns: Type.Optional(Type.Number({ description: "Turn cap override for this delegated run" })),
+  maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Runtime cap override for this delegated run" })),
 });
 
 const ChainItem = Type.Object({
   agent: Type.String({ description: "Name of the agent to invoke" }),
   task: Type.String({ description: "Task with optional {previous} placeholder" }),
   cwd: Type.Optional(Type.String({ description: "Working directory for this delegated run" })),
+  maxTurns: Type.Optional(Type.Number({ description: "Turn cap override for this chain step" })),
+  maxRuntimeSeconds: Type.Optional(Type.Number({ description: "Runtime cap override for this chain step" })),
 });
 
 const AgentScopeSchema = StringEnum(["user", "project", "both"] as const, {
@@ -81,6 +105,12 @@ const SubagentParams = Type.Object({
       description: "Require explicit confirmation before running project-local agents.",
       default: true,
     })
+  ),
+  maxTurns: Type.Optional(
+    Type.Number({ description: "Global turn cap for delegated runs. Defaults to extension/agent policy." })
+  ),
+  maxRuntimeSeconds: Type.Optional(
+    Type.Number({ description: "Global runtime cap in seconds for delegated runs." })
   ),
   cwd: Type.Optional(Type.String({ description: "Working directory for single mode" })),
 });
@@ -175,6 +205,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             cwd: step.cwd,
             step: i + 1,
             signal,
+            guardrailBudget: resolveGuardrailBudget({
+              maxTurns: step.maxTurns,
+              maxRuntimeSeconds: step.maxRuntimeSeconds,
+            }, {
+              maxTurns: params.maxTurns,
+              maxRuntimeSeconds: params.maxRuntimeSeconds,
+            }),
             onUpdate: emit
               ? (partial) => {
                   const running = [...results, partial];
@@ -249,6 +286,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             task: task.task,
             cwd: task.cwd,
             signal,
+            guardrailBudget: resolveGuardrailBudget({
+              maxTurns: task.maxTurns,
+              maxRuntimeSeconds: task.maxRuntimeSeconds,
+            }, {
+              maxTurns: params.maxTurns,
+              maxRuntimeSeconds: params.maxRuntimeSeconds,
+            }),
             onUpdate: emit
               ? (partial) => {
                   allResults[index] = partial;
@@ -284,6 +328,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           task: params.task,
           cwd: params.cwd,
           signal,
+          guardrailBudget: resolveGuardrailBudget(undefined, {
+            maxTurns: params.maxTurns,
+            maxRuntimeSeconds: params.maxRuntimeSeconds,
+          }),
           onUpdate: emit,
         });
 
@@ -355,6 +403,32 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           out += theme.fg("muted", ` step=${entry.step}`);
         }
 
+        const elapsedSeconds = (entry.elapsedMs / 1000).toFixed(1);
+        const budgetParts: string[] = [];
+        if (entry.maxTurns) {
+          budgetParts.push(`turns ${entry.usage.turns}/${entry.maxTurns}`);
+        } else {
+          budgetParts.push(`turns ${entry.usage.turns}`);
+        }
+        budgetParts.push(`tools ${entry.toolCallCount}`);
+        if (entry.maxRuntimeSeconds) {
+          budgetParts.push(`runtime ${elapsedSeconds}s/${entry.maxRuntimeSeconds}s`);
+        } else {
+          budgetParts.push(`runtime ${elapsedSeconds}s`);
+        }
+        out += `\n${theme.fg("muted", budgetParts.join(" · "))}`;
+
+        if (entry.model || entry.configuredModel) {
+          out += `\n${theme.fg("dim", `model: ${entry.model ?? entry.configuredModel}`)}`;
+        }
+        if (entry.configuredTools && entry.configuredTools.length > 0) {
+          out += `\n${theme.fg("dim", `tools: ${entry.configuredTools.join(",")}`)}`;
+        }
+
+        if (entry.lastAction) {
+          out += `\n${theme.fg("dim", `last: ${entry.lastAction}`)}`;
+        }
+
         const preview = getFinalOutput(entry.messages);
         if (preview) {
           const rendered = expanded ? preview : preview.split("\n").slice(0, 3).join("\n");
@@ -365,10 +439,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         } else if (entry.stderr) {
           out += `\n${theme.fg("dim", entry.stderr.trim())}`;
         } else {
-          out += `\n${theme.fg("muted", "(no output)")}`;
+          out += `\n${theme.fg("muted", "(no final text yet)")}`;
         }
 
-        out += `\n${theme.fg("dim", formatUsage(entry.usage, entry.model))}`;
+        out += `\n${theme.fg("dim", formatUsage(entry.usage, entry.model ?? entry.configuredModel))}`;
       }
 
       return new Text(out.trim(), 0, 0);
@@ -437,6 +511,7 @@ function isFailure(result: SingleResult): boolean {
 }
 
 function emptyResult(agent: string, task: string): SingleResult {
+  const now = Date.now();
   return {
     agent,
     agentSource: "unknown",
@@ -453,6 +528,10 @@ function emptyResult(agent: string, task: string): SingleResult {
       contextTokens: 0,
       turns: 0,
     },
+    startedAtMs: now,
+    lastUpdateAtMs: now,
+    elapsedMs: 0,
+    toolCallCount: 0,
   };
 }
 
@@ -464,6 +543,7 @@ interface RunSingleAgentOptions {
   cwd?: string;
   step?: number;
   signal?: AbortSignal;
+  guardrailBudget?: Partial<GuardrailBudget>;
   onUpdate?: (result: SingleResult) => void;
 }
 
@@ -479,6 +559,11 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
     };
   }
 
+  const guardrailBudget = resolveGuardrailBudget(options.guardrailBudget, {
+    maxTurns: agent.maxTurns,
+    maxRuntimeSeconds: agent.maxRuntimeSeconds,
+  });
+
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   if (agent.model) {
     args.push("--model", agent.model);
@@ -490,7 +575,10 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
   let promptDir: string | null = null;
   try {
     if (agent.systemPrompt.trim()) {
-      const promptFile = createTempPromptFile(agent.name, agent.systemPrompt);
+      const promptFile = createTempPromptFile(
+        agent.name,
+        appendSubagentExecutionContract(agent.systemPrompt, guardrailBudget)
+      );
       promptDir = promptFile.dir;
       args.push("--append-system-prompt", promptFile.filePath);
     }
@@ -503,9 +591,14 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
       exitCode: 0,
       step: options.step,
       model: agent.model,
+      configuredModel: agent.model,
+      configuredTools: agent.tools,
+      maxTurns: guardrailBudget.maxTurns,
+      maxRuntimeSeconds: guardrailBudget.maxRuntimeSeconds,
     };
 
     let aborted = false;
+    let abortReason: string | null = null;
 
     const exitCode = await new Promise<number>((resolve) => {
       const child = spawn("pi", args, {
@@ -514,7 +607,34 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
         stdio: ["ignore", "pipe", "pipe"],
       });
 
+      let childClosed = false;
       let stdoutBuffer = "";
+      let forceKillTimer: NodeJS.Timeout | null = null;
+      let runtimeTimer: NodeJS.Timeout | null = null;
+      let heartbeatTimer: NodeJS.Timeout | null = null;
+
+      const updateProgress = () => {
+        result.lastUpdateAtMs = Date.now();
+        result.elapsedMs = Math.max(0, result.lastUpdateAtMs - result.startedAtMs);
+        options.onUpdate?.(result);
+      };
+
+      const abortChild = (reason: string) => {
+        if (aborted || childClosed) {
+          return;
+        }
+        aborted = true;
+        abortReason = reason;
+        result.lastAction = `abort: ${reason}`;
+        updateProgress();
+
+        child.kill("SIGTERM");
+        forceKillTimer = setTimeout(() => {
+          if (!child.killed) {
+            child.kill("SIGKILL");
+          }
+        }, 4_000);
+      };
 
       const processEventLine = (line: string) => {
         if (!line.trim()) {
@@ -541,6 +661,16 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
               result.model = message.model;
             }
 
+            const toolCallsInMessage = message.content.filter((part) => part.type === "toolCall").length;
+            if (toolCallsInMessage > 0) {
+              result.toolCallCount += toolCallsInMessage;
+            }
+
+            const assistantSummary = summarizeAssistantMessage(message);
+            if (assistantSummary) {
+              result.lastAction = assistantSummary;
+            }
+
             if (message.usage) {
               result.usage.turns += 1;
               result.usage.input += message.usage.input ?? 0;
@@ -550,9 +680,13 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
               result.usage.cost += message.usage.cost?.total ?? 0;
               result.usage.contextTokens = message.usage.totalTokens ?? result.usage.contextTokens;
             }
+
+            if (result.usage.turns >= guardrailBudget.maxTurns) {
+              abortChild(`turn budget exceeded (${guardrailBudget.maxTurns})`);
+            }
           }
 
-          options.onUpdate?.(result);
+          updateProgress();
         } catch {
           // Ignore malformed JSON lines from subprocess.
         }
@@ -568,42 +702,87 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
       });
 
       child.stderr.on("data", (chunk) => {
-        result.stderr += chunk.toString();
+        const text = chunk.toString();
+        result.stderr += text;
+        const trimmed = text.trim();
+        if (trimmed) {
+          result.lastAction = `stderr: ${trimmed.split("\n").at(-1)?.slice(0, 120) ?? trimmed.slice(0, 120)}`;
+          updateProgress();
+        }
       });
 
+      const signalAbort = () => abortChild("parent signal canceled subagent");
+      if (options.signal) {
+        if (options.signal.aborted) {
+          signalAbort();
+        } else {
+          options.signal.addEventListener("abort", signalAbort, { once: true });
+        }
+      }
+
+      runtimeTimer = setTimeout(() => {
+        abortChild(`runtime budget exceeded (${guardrailBudget.maxRuntimeSeconds}s)`);
+      }, guardrailBudget.maxRuntimeSeconds * 1000);
+
+      heartbeatTimer = setInterval(() => {
+        if (!childClosed) {
+          updateProgress();
+        }
+      }, 1_000);
+
+      updateProgress();
+
       child.on("close", (code) => {
+        childClosed = true;
         if (stdoutBuffer.trim()) {
           processEventLine(stdoutBuffer);
         }
+
+        if (options.signal) {
+          options.signal.removeEventListener("abort", signalAbort);
+        }
+        if (runtimeTimer) {
+          clearTimeout(runtimeTimer);
+          runtimeTimer = null;
+        }
+        if (forceKillTimer) {
+          clearTimeout(forceKillTimer);
+          forceKillTimer = null;
+        }
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+
         resolve(code ?? 0);
       });
 
-      child.on("error", () => resolve(1));
-
-      if (options.signal) {
-        const abortChild = () => {
-          aborted = true;
-          child.kill("SIGTERM");
-          setTimeout(() => {
-            if (!child.killed) {
-              child.kill("SIGKILL");
-            }
-          }, 4_000);
-        };
-
-        if (options.signal.aborted) {
-          abortChild();
-        } else {
-          options.signal.addEventListener("abort", abortChild, { once: true });
+      child.on("error", () => {
+        childClosed = true;
+        if (runtimeTimer) {
+          clearTimeout(runtimeTimer);
+          runtimeTimer = null;
         }
-      }
+        if (forceKillTimer) {
+          clearTimeout(forceKillTimer);
+          forceKillTimer = null;
+        }
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+        resolve(1);
+      });
     });
 
     result.exitCode = exitCode;
+    result.lastUpdateAtMs = Date.now();
+    result.elapsedMs = Math.max(0, result.lastUpdateAtMs - result.startedAtMs);
+
     if (aborted) {
       result.stopReason = "aborted";
       if (!result.errorMessage) {
-        result.errorMessage = "Subagent aborted by parent signal.";
+        result.errorMessage = abortReason ?? "Subagent aborted by parent signal.";
       }
     }
 
@@ -613,6 +792,106 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
       rmSync(promptDir, { recursive: true, force: true });
     }
   }
+}
+
+function resolveGuardrailBudget(
+  primary?: Partial<GuardrailBudget>,
+  fallback?: Partial<GuardrailBudget>
+): GuardrailBudget {
+  return {
+    maxTurns: clampInteger(
+      primary?.maxTurns ?? fallback?.maxTurns,
+      DEFAULT_MAX_TURNS,
+      MIN_MAX_TURNS,
+      MAX_MAX_TURNS
+    ),
+    maxRuntimeSeconds: clampInteger(
+      primary?.maxRuntimeSeconds ?? fallback?.maxRuntimeSeconds,
+      DEFAULT_MAX_RUNTIME_SECONDS,
+      MIN_MAX_RUNTIME_SECONDS,
+      MAX_MAX_RUNTIME_SECONDS
+    ),
+  };
+}
+
+function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+  const rounded = Math.round(value);
+  return Math.min(max, Math.max(min, rounded));
+}
+
+function appendSubagentExecutionContract(basePrompt: string, budget: GuardrailBudget): string {
+  const lines = [
+    basePrompt.trim(),
+    "",
+    "Execution contract:",
+    "- Keep investigation bounded and converge quickly.",
+    "- If evidence is sufficient, stop exploring and synthesize.",
+    "- Emit concise status notes while working: `STATUS: <what changed> | next: <next action>`.",
+    `- Hard budget: max ${budget.maxTurns} assistant turns and ${budget.maxRuntimeSeconds}s runtime.`,
+    "- If budget risk is high, summarize best-known answer with explicit uncertainty.",
+  ];
+
+  return lines.join("\n");
+}
+
+function summarizeAssistantMessage(message: Message): string | undefined {
+  for (const part of message.content) {
+    if (part.type === "toolCall") {
+      return summarizeToolCall(part.name, part.arguments as Record<string, unknown> | undefined);
+    }
+  }
+
+  for (const part of message.content) {
+    if (part.type === "text") {
+      const text = part.text.trim();
+      if (text) {
+        return `text: ${text.split("\n")[0].slice(0, 120)}`;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function summarizeToolCall(name: string, args?: Record<string, unknown>): string {
+  const value = args ?? {};
+  if (name === "read") {
+    const path = String(value.path ?? value.file_path ?? "(path?)");
+    const offset = value.offset;
+    const limit = value.limit;
+    const range = offset || limit ? `:${offset ?? 1}${limit ? `+${limit}` : ""}` : "";
+    return `tool: read ${truncate(path, 90)}${range}`;
+  }
+  if (name === "bash") {
+    return `tool: bash ${truncate(String(value.command ?? ""), 90)}`;
+  }
+  if (name === "grep") {
+    return `tool: grep /${truncate(String(value.pattern ?? ""), 50)}/`;
+  }
+  if (name === "find") {
+    return `tool: find ${truncate(String(value.path ?? "."), 70)}`;
+  }
+  if (name === "ls") {
+    return `tool: ls ${truncate(String(value.path ?? "."), 70)}`;
+  }
+  if (name === "edit") {
+    return `tool: edit ${truncate(String(value.path ?? value.file_path ?? ""), 90)}`;
+  }
+  if (name === "write") {
+    return `tool: write ${truncate(String(value.path ?? value.file_path ?? ""), 90)}`;
+  }
+
+  return `tool: ${name}`;
+}
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, max - 1))}…`;
 }
 
 function createTempPromptFile(agentName: string, systemPrompt: string): { dir: string; filePath: string } {

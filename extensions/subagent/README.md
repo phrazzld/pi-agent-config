@@ -27,6 +27,16 @@ Modes (exactly one per call):
 Common params:
 - `agentScope`: `user | project | both` (default `user`)
 - `confirmProjectAgents`: boolean (default `true`)
+- `maxTurns`: global turn budget override (default `80`)
+- `maxRuntimeSeconds`: global runtime budget override (default `600`)
+
+Per-task overrides:
+- `tasks[].maxTurns`, `tasks[].maxRuntimeSeconds`
+- `chain[].maxTurns`, `chain[].maxRuntimeSeconds`
+
+Agent frontmatter can also set defaults:
+- `maxTurns: <int>`
+- `maxRuntimeSeconds: <int>`
 
 ## Agent discovery
 
@@ -39,6 +49,17 @@ When `agentScope` includes project agents, interactive confirmation is required 
 
 This repo versions agent definitions under `agents/` and `scripts/bootstrap.sh` symlinks it to `~/.pi/agent/agents`.
 
+## Runtime visibility
+
+The subagent card now surfaces live state while runs are in progress:
+- runtime elapsed vs configured budget
+- turns consumed vs configured budget
+- tool call count
+- context/token usage (input/output/cache/context)
+- model used and last observed action
+
+When a budget is exceeded, the subprocess is terminated and returns `aborted` with an explicit reason.
+
 ## Agent file format
 
 ```md
@@ -46,7 +67,9 @@ This repo versions agent definitions under `agents/` and `scripts/bootstrap.sh` 
 name: scout
 description: Fast codebase recon
 tools: read, grep, find, ls, bash
-model: gpt-5.3-codex
+model: openai-codex/gpt-5.3-codex
+maxTurns: 40
+maxRuntimeSeconds: 300
 ---
 
 System prompt for the agent...

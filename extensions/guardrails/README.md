@@ -11,9 +11,6 @@ Adds:
 - `/pr` completion gate:
   - when `/pr` is invoked, guardrails verifies a PR exists for the current branch before treating flow as complete
   - if missing, injects a follow-up instruction to create/update PR and report URL
-- repository scope guardrail:
-  - read/write/edit and `bash` commands that `cd` outside the current cwd require explicit confirmation
-  - approvals are remembered per external repo scope for the current session
 - local PR governance trend logging (`logs/pr-governance.ndjson`)
 
 Env:
@@ -22,7 +19,6 @@ Env:
 - `PI_PR_GOVERNANCE_AUTOFIX` (default `true`)
 - `PI_PR_LINT_TIMEOUT_MS` (default `120000`)
 - `PI_PR_TITLE_MAX_CHARS` (default `72`)
-- `PI_EXTERNAL_SCOPE_GUARD` (default `true`; set `false` to disable external-path confirmations)
 
 Commands:
 - `/guardrails` to view active config

@@ -41,6 +41,19 @@ describe("subagent agent discovery", () => {
     expect(parsed).toBeNull();
   });
 
+  test("parseAgentConfig parses optional model and guardrail frontmatter", () => {
+    const parsed = parseAgentConfig(
+      `---\nname: scout\ndescription: quick scout\nmodel: google/gemini-3-flash-preview\nmaxTurns: 25\nmaxRuntimeSeconds: 180\n---\n\nPrompt`,
+      "scout.md",
+      "user"
+    );
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.model).toBe("google/gemini-3-flash-preview");
+    expect(parsed?.maxTurns).toBe(25);
+    expect(parsed?.maxRuntimeSeconds).toBe(180);
+  });
+
   test("discoverAgents merges by scope and project overrides user in both mode", () => {
     const userAgentsDir = path.join(tempRoot, ".pi", "agent", "agents");
     mkdirSync(userAgentsDir, { recursive: true });

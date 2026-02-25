@@ -9,6 +9,8 @@ export interface AgentConfig {
   description: string;
   tools?: string[];
   model?: string;
+  maxTurns?: number;
+  maxRuntimeSeconds?: number;
   systemPrompt: string;
   source: "user" | "project";
   filePath: string;
@@ -83,6 +85,8 @@ export function parseAgentConfig(
     description,
     tools: tools && tools.length > 0 ? tools : undefined,
     model: frontmatter.model?.trim() || undefined,
+    maxTurns: parseOptionalPositiveInt(frontmatter.maxTurns),
+    maxRuntimeSeconds: parseOptionalPositiveInt(frontmatter.maxRuntimeSeconds),
     systemPrompt: body.trim(),
     source,
     filePath,
@@ -193,6 +197,17 @@ export function formatAgentList(agents: AgentConfig[], maxItems = 6): { text: st
     text: shown.map((agent) => `${agent.name} (${agent.source})`).join(", "),
     remaining,
   };
+}
+
+function parseOptionalPositiveInt(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return parsed;
 }
 
 function resolveHomeDir(): string {

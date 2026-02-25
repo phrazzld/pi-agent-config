@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -30,8 +30,6 @@ const PR_TITLE_MAX_CHARS = clampNumber(
 );
 const PR_METADATA_AUTOFIX =
   process.env.PI_PR_GOVERNANCE_AUTOFIX?.toLowerCase() !== "false";
-const EXTERNAL_SCOPE_GUARD =
-  process.env.PI_EXTERNAL_SCOPE_GUARD?.toLowerCase() !== "false";
 
 const ANSI_CSI_REGEX = new RegExp("\\u001b\\[[0-9;]*[A-Za-z]", "g");
 const ANSI_OSC_REGEX = new RegExp("\\u001b\\][^\\u0007]*\\u0007", "g");
@@ -60,7 +58,6 @@ interface GuardrailsState {
   prLintRunning: boolean;
   prLintQueued: boolean;
   queuedPrCommand: string | null;
-  approvedExternalScopes: Set<string>;
   prPromptPendingVerification: boolean;
   prPromptAutoReminderSent: boolean;
 }
@@ -110,12 +107,11 @@ export default function guardrailsExtension(pi: ExtensionAPI): void {
     prLintRunning: false,
     prLintQueued: false,
     queuedPrCommand: null,
-    approvedExternalScopes: new Set<string>(),
     prPromptPendingVerification: false,
     prPromptAutoReminderSent: false,
   };
 
-  pi.on("tool_call", async (event, ctx) => {
+  pi.on("tool_call", async (event) => {
     if (event.toolName === "bash") {
       const command = String(event.input.command ?? "");
 
@@ -135,40 +131,13 @@ export default function guardrailsExtension(pi: ExtensionAPI): void {
         };
       }
 
-      const scopeDecision = await evaluateExternalScopeForBash(
-        command,
-        ctx,
-        state,
-      );
-      if (scopeDecision.block) {
-        return {
-          block: true,
-          reason: scopeDecision.reason,
-        };
-      }
       return undefined;
-    }
-
-    if (event.toolName === "read" || event.toolName === "write" || event.toolName === "edit") {
-      const rawPath = String((event.input as { path?: string }).path ?? "");
-      const scopeDecision = await evaluateExternalScopeForPath(
-        rawPath,
-        event.toolName,
-        ctx,
-        state,
-      );
-      if (scopeDecision.block) {
-        return {
-          block: true,
-          reason: scopeDecision.reason,
-        };
-      }
     }
 
     return undefined;
   });
 
-  pi.on("user_bash", async (event, ctx) => {
+  pi.on("user_bash", async (event) => {
     const commandDecision = evaluateCommandSafety(event.command);
     if (commandDecision.block) {
       return {
@@ -187,22 +156,6 @@ export default function guardrailsExtension(pi: ExtensionAPI): void {
         result: {
           output:
             prCommandDecision.reason ?? "Blocked by PR metadata guardrails.",
-          exitCode: 1,
-          cancelled: true,
-          truncated: false,
-        },
-      };
-    }
-
-    const scopeDecision = await evaluateExternalScopeForBash(
-      event.command,
-      ctx,
-      state,
-    );
-    if (scopeDecision.block) {
-      return {
-        result: {
-          output: scopeDecision.reason,
           exitCode: 1,
           cancelled: true,
           truncated: false,
@@ -306,10 +259,6 @@ export default function guardrailsExtension(pi: ExtensionAPI): void {
         `- PR title max chars: ${PR_TITLE_MAX_CHARS}`,
         `- PR governance log: ${getPrGovernanceLogPath()}`,
         "- /pr completion gate verifies PR exists for current branch before completion",
-        "",
-        "Repository scope policy:",
-        `- External path confirmation required: ${EXTERNAL_SCOPE_GUARD}`,
-        "- Access outside current cwd (read/write/edit/bash cd) requires explicit confirmation",
         "",
         `Post-edit feedback: ${fastFeedback}`,
       ];
@@ -668,197 +617,6 @@ function runnerCmd(
     return `bun run ${script}`;
   }
   return `npm run -s ${script}`;
-}
-
-interface ExternalScopeDecision {
-  block: boolean;
-  reason: string;
-}
-
-async function evaluateExternalScopeForPath(
-  rawPath: string,
-  toolName: "read" | "write" | "edit",
-  ctx: ExtensionContext,
-  state: GuardrailsState,
-): Promise<ExternalScopeDecision> {
-  if (!EXTERNAL_SCOPE_GUARD) {
-    return { block: false, reason: "" };
-  }
-
-  const trimmed = rawPath.trim();
-  if (!trimmed) {
-    return { block: false, reason: "" };
-  }
-
-  const resolved = resolvePathToken(trimmed, ctx.cwd);
-  if (!resolved || !isPathOutsideCwd(ctx.cwd, resolved)) {
-    return { block: false, reason: "" };
-  }
-
-  const approved = await confirmExternalScope(
-    scopeKeyForPath(resolved),
-    `Tool \`${toolName}\` path: ${trimmed}`,
-    ctx,
-    state,
-  );
-
-  if (approved) {
-    return { block: false, reason: "" };
-  }
-
-  return {
-    block: true,
-    reason:
-      `Blocked: ${toolName} path resolves outside current working directory. ` +
-      `cwd=${ctx.cwd} requested=${resolved}. Confirm external scope before retrying.`,
-  };
-}
-
-async function evaluateExternalScopeForBash(
-  command: string,
-  ctx: ExtensionContext,
-  state: GuardrailsState,
-): Promise<ExternalScopeDecision> {
-  if (!EXTERNAL_SCOPE_GUARD) {
-    return { block: false, reason: "" };
-  }
-
-  const targets = extractExternalCdTargets(command, ctx.cwd);
-  for (const target of targets) {
-    const approved = await confirmExternalScope(
-      scopeKeyForPath(target),
-      `Bash command directory: ${target}`,
-      ctx,
-      state,
-    );
-    if (!approved) {
-      return {
-        block: true,
-        reason:
-          `Blocked: bash command targets directory outside current working directory. ` +
-          `cwd=${ctx.cwd} requested=${target}. Confirm external scope before retrying.`,
-      };
-    }
-  }
-
-  return { block: false, reason: "" };
-}
-
-async function confirmExternalScope(
-  scopePath: string,
-  source: string,
-  ctx: ExtensionContext,
-  state: GuardrailsState,
-): Promise<boolean> {
-  if (!EXTERNAL_SCOPE_GUARD) {
-    return true;
-  }
-  if (state.approvedExternalScopes.has(scopePath)) {
-    return true;
-  }
-  if (!ctx.hasUI) {
-    return false;
-  }
-
-  const approved = await ctx.ui.confirm(
-    "External scope confirmation",
-    [
-      "Allow access outside current working directory?",
-      `Current cwd: ${ctx.cwd}`,
-      `Requested scope: ${scopePath}`,
-      `Source: ${source}`,
-      "",
-      "If approved, this scope is remembered for the current session.",
-    ].join("\n"),
-  );
-
-  if (approved) {
-    state.approvedExternalScopes.add(scopePath);
-  }
-
-  return approved;
-}
-
-function extractExternalCdTargets(command: string, cwd: string): string[] {
-  const out: string[] = [];
-  const matcher = /\bcd\s+((?:"[^"]+"|'[^']+'|[^\s;&|]+))/g;
-
-  for (const match of command.matchAll(matcher)) {
-    const token = match[1]?.trim();
-    if (!token) {
-      continue;
-    }
-
-    const resolved = resolvePathToken(token, cwd);
-    if (!resolved) {
-      continue;
-    }
-
-    if (isPathOutsideCwd(cwd, resolved)) {
-      out.push(resolved);
-    }
-  }
-
-  return dedupe(out);
-}
-
-function resolvePathToken(token: string, cwd: string): string | null {
-  const cleaned = token
-    .replace(/^@/, "")
-    .replace(/^['"]|['"]$/g, "")
-    .trim();
-
-  if (!cleaned || cleaned === "-" || cleaned.startsWith("$") || cleaned.includes("$(") || cleaned.includes("`")) {
-    return null;
-  }
-
-  if (cleaned.startsWith("~")) {
-    const home = process.env.HOME?.trim();
-    if (!home) {
-      return null;
-    }
-    return path.resolve(path.join(home, cleaned.slice(1)));
-  }
-
-  return path.resolve(cwd, cleaned);
-}
-
-function isPathOutsideCwd(cwd: string, targetPath: string): boolean {
-  const base = path.resolve(cwd);
-  const target = path.resolve(targetPath);
-  const rel = path.relative(base, target);
-  if (!rel) {
-    return false;
-  }
-  return rel.startsWith("..") || path.isAbsolute(rel);
-}
-
-function scopeKeyForPath(targetPath: string): string {
-  let current = directoryForPath(targetPath);
-  while (true) {
-    if (existsSync(path.join(current, ".git"))) {
-      return current;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return directoryForPath(targetPath);
-    }
-    current = parent;
-  }
-}
-
-function directoryForPath(targetPath: string): string {
-  try {
-    return statSync(targetPath).isDirectory()
-      ? path.resolve(targetPath)
-      : path.resolve(path.dirname(targetPath));
-  } catch {
-    return path.resolve(path.dirname(targetPath));
-  }
-}
-
-function dedupe(values: string[]): string[] {
-  return Array.from(new Set(values));
 }
 
 function isPrTemplateInvocation(text: string): boolean {
