@@ -1,0 +1,32 @@
+core:
+  - scout
+  - planner
+  - worker
+  - reviewer
+
+intake:
+  - scout
+  - planner
+  - plan-reviewer
+
+delivery:
+  - planner
+  - worker
+  - reviewer
+
+hardening:
+  - reviewer
+  - red-team
+
+docs:
+  - worker
+  - documenter
+
+autopilot:
+  - scout
+  - planner
+  - plan-reviewer
+  - worker
+  - reviewer
+  - red-team
+  - documenter

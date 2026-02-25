@@ -1,0 +1,45 @@
+plan-build-review:
+  description: "Fast default pipeline: plan, implement, review"
+  steps:
+    - agent: planner
+      prompt: "Create an implementation plan for: $INPUT"
+    - agent: worker
+      prompt: "Execute this plan with focused changes and verification:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Review this implementation for correctness, risk, and maintainability:\n\n$INPUT"
+
+plan-critique-build-review:
+  description: "Safer default for non-trivial work: plan, critique, build, review"
+  steps:
+    - agent: planner
+      prompt: "Create an implementation plan for: $INPUT"
+    - agent: plan-reviewer
+      prompt: "Critique this plan for missing steps, bad sequencing, and unmitigated risks:\n\n$INPUT\n\nOriginal goal: $ORIGINAL"
+    - agent: worker
+      prompt: "Implement using the plan + critique guidance. Keep scope tight and verify behavior:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Review the implementation for bugs, maintainability, and deployment risk:\n\n$INPUT"
+
+autopilot-v1:
+  description: "Bounded issue-to-PR flow with explicit checkpoints"
+  checkpoints:
+    - after-intake
+    - before-pr
+    - before-merge
+  steps:
+    - agent: scout
+      prompt: "Issue intake: identify the highest-priority open issue, summarize acceptance criteria, and list constraints.\n\nContext: $INPUT"
+    - agent: planner
+      prompt: "Produce an execution plan for this issue with explicit risks and tests.\n\n$INPUT"
+    - agent: plan-reviewer
+      prompt: "Critique this plan and force corrections before implementation.\n\n$INPUT\n\nOriginal objective: $ORIGINAL"
+    - agent: worker
+      prompt: "Implement the approved plan end-to-end with minimal scope creep and run verification.\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Perform a blocking review. Classify findings by severity and include must-fix items before PR.\n\n$INPUT"
+    - agent: red-team
+      prompt: "Run an adversarial review for security and abuse/failure paths. Report blocking findings only.\n\n$INPUT"
+    - agent: documenter
+      prompt: "Prepare PR-ready summary/docs evidence: what changed, why, verification, and residual risk.\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Final merge-readiness check against the original objective. Confirm blockers resolved or explicitly deferred.\n\nOriginal objective: $ORIGINAL\n\nCurrent state: $INPUT"
