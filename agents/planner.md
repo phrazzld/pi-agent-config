@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Turns scoped findings into an implementation plan with risk notes
-tools: read, grep, find, ls
+tools: read, grep, find, ls, bash
 model: openai-codex/gpt-5.3-codex
 maxTurns: 45
 maxRuntimeSeconds: 420

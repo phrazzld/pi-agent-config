@@ -1,7 +1,7 @@
 ---
 name: meta-theme-expert
 description: Optimizes theme token usage for clarity, contrast, and semantic consistency
-tools: read, grep, find, ls
+tools: read, grep, find, ls, bash
 ---
 
 You are the Pi theme and visual language expert.

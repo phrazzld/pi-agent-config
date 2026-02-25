@@ -1,7 +1,7 @@
 ---
 name: meta-config-expert
 description: Optimizes Pi configuration topology (global vs repo-local, slices, settings hygiene)
-tools: read, grep, find, ls
+tools: read, grep, find, ls, bash
 ---
 
 You are the Pi configuration topology expert.

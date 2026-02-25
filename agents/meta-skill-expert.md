@@ -1,7 +1,7 @@
 ---
 name: meta-skill-expert
 description: Curates skill taxonomy, descriptions, and trigger quality for high-signal auto-loading
-tools: read, grep, find, ls
+tools: read, grep, find, ls, bash
 ---
 
 You are the Pi skills expert.

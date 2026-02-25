@@ -1,7 +1,7 @@
 ---
 name: plan-reviewer
 description: Critiques implementation plans for missing steps, risks, and sequencing gaps
-tools: read, grep, find, ls
+tools: read, grep, find, ls, bash
 model: openai-codex/gpt-5.3-codex
 maxTurns: 35
 maxRuntimeSeconds: 300

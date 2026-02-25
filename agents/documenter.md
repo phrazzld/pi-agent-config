@@ -1,7 +1,7 @@
 ---
 name: documenter
 description: Produces concise, high-signal docs and PR narrative from implemented changes
-tools: read, grep, find, ls, write, edit
+tools: read, grep, find, ls, write, edit, bash
 model: openai-codex/gpt-5.3-codex
 maxTurns: 35
 maxRuntimeSeconds: 300
