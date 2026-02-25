@@ -8,6 +8,7 @@ describe("bootstrap args", () => {
     expect(parsed.domain).toBe("vox");
     expect(parsed.force).toBe(true);
     expect(parsed.quick).toBe(false);
+    expect(parsed.max).toBe(false);
   });
 
   test("parses --domain forms", () => {
@@ -17,6 +18,10 @@ describe("bootstrap args", () => {
 
   test("parses quick flag", () => {
     expect(parseBootstrapArgs("--quick", "default").quick).toBe(true);
+  });
+
+  test("parses max flag", () => {
+    expect(parseBootstrapArgs("--max", "default").max).toBe(true);
   });
 
   test("falls back to default domain", () => {

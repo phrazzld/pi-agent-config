@@ -2,12 +2,14 @@ export interface BootstrapArgs {
   domain: string;
   force: boolean;
   quick: boolean;
+  max: boolean;
 }
 
 export function parseBootstrapArgs(raw: string, defaultDomain: string): BootstrapArgs {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
   let force = false;
   let quick = false;
+  let max = false;
   let domain = "";
 
   for (let index = 0; index < tokens.length; index++) {
@@ -20,6 +22,11 @@ export function parseBootstrapArgs(raw: string, defaultDomain: string): Bootstra
 
     if (token === "--quick") {
       quick = true;
+      continue;
+    }
+
+    if (token === "--max") {
+      max = true;
       continue;
     }
 
@@ -44,6 +51,7 @@ export function parseBootstrapArgs(raw: string, defaultDomain: string): Bootstra
     domain: sanitizeDomain(domain || defaultDomain),
     force,
     quick,
+    max,
   };
 }
 

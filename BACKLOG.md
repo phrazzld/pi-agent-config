@@ -47,7 +47,7 @@ Build a world-class, explicit Pi configuration system with:
 
 - [ ] Add weekly telemetry rollup command for `~/.pi/agent/logs/primitive-usage.ndjson`.
 - [ ] Add orchestration execution guards: `maxTurns`, `maxRuntimeSeconds`, retries, failure policy.
-- [ ] Add bootstrap `--max` mode (extra research/critic lanes + consensus round).
+- [ ] Extend bootstrap `--max` mode with a final consensus/scoring round.
 - [ ] Run bootstrap across active repos and capture deltas in per-repo notes.
 
 ### Next
