@@ -1,0 +1,10 @@
+{
+  "description": "Pi-config development slice for extension/prompt/skill architecture work.",
+  "defaultProfile": "meta",
+  "extensions": [
+    "extensions/guardrails/index.ts",
+    "extensions/profiles/index.ts",
+    "extensions/web-search/index.ts",
+    "extensions/subagent/index.ts"
+  ]
+}

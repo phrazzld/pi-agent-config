@@ -1,0 +1,8 @@
+{
+  "description": "Minimal safety-first default for day-to-day work.",
+  "defaultProfile": "execute",
+  "extensions": [
+    "extensions/guardrails/index.ts",
+    "extensions/profiles/index.ts"
+  ]
+}
