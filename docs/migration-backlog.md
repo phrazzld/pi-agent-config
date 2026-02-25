@@ -1,5 +1,7 @@
 # Pi Migration Backlog
 
+> Superseded as primary queue by root `BACKLOG.md`. Keep this file for migration-history context.
+
 Built from `PLAN.md` to keep scope lean and reversible.
 
 ## Keep / Drop / Later Matrix
@@ -17,13 +19,14 @@ Built from `PLAN.md` to keep scope lean and reversible.
 ## Prioritized Backlog
 
 1. P0 done: Web retrieval as first-class Pi extension tool (`web_search`) with provider routing, cache, logs, recency, and uncertainty metadata.
-2. P0 done: Guardrails extension for destructive bash and protected-path edit/write blocks.
+2. P0 done: Guardrails extension for destructive command controls + PR governance safety checks.
 3. P0 done: Thin workflow parity via prompt templates (`execute`, `spec`, `architect`, `pr`, `respond`, `polish`, `fix-ci`, `groom`, `autopilot`).
 4. P1 done: Profile modes extension (`ultrathink`, `execute`, `ship`, `fast`).
 5. P1 done: Capability slicing control plane (`pictl`) + slice manifests (`slices/*.json`) for narrow runtime composition.
-6. P1 in progress: Teams/pipelines as config data (`agents/teams.yaml`, `agents/pipelines.yaml`) with manual orchestration via `subagent`.
-7. P1 pending: Add optional orchestrator extension that executes team/pipeline configs directly.
-8. P1 pending: Add extension-level metrics rollup (counts, latency, cache hit rate) for weekly review.
+6. P1 done: Teams/pipelines as config data (`agents/teams.yaml`, `agents/pipelines.yaml`).
+7. P1 done: Orchestrator extension executes team/pipeline configs directly (`extensions/orchestration`).
+8. P1 done: Code-backed repo bootstrap primitive (`extensions/bootstrap`, `/bootstrap-repo`, `bootstrap_repo`).
+9. P1 in progress: Extension-level visibility + metrics rollup (`extensions/visibility` logs/session summaries); add weekly aggregation view.
 
 ## Exit Criteria
 

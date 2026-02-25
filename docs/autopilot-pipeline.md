@@ -42,6 +42,12 @@ Ship one issue from intake to merge readiness with explicit human checkpoints an
    - `/squash-merge` path only.
    - **Checkpoint:** explicit human authorization before merge.
 
+8. **Reflection + codification gate (new)**
+   - Run a post-run reflection with a high-intelligence model.
+   - Capture what changed, what was learned, and what should be codified.
+   - Propose updates to backlog, repo-local `.pi`, and global `pi-agent-config`.
+   - Required before starting the next autonomous run in flywheel mode.
+
 ## Circuit breakers
 
 - Max CI/review fix loops per PR
