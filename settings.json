@@ -1,7 +1,11 @@
 {
-  "lastChangelogVersion": "0.54.2",
+  "lastChangelogVersion": "0.55.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.3-codex",
   "theme": "dark",
-  "defaultThinkingLevel": "high"
+  "defaultThinkingLevel": "high",
+  "hideThinkingBlock": false,
+  "skills": [
+    "!/Users/phaedrus/.agents/skills/**"
+  ]
 }
