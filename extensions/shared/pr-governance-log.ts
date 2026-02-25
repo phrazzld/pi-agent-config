@@ -3,7 +3,25 @@ import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 
+import { appendLineWithRotation } from "./log-rotation";
+
 export type PrGovernanceEventKind = "pr_metadata_lint" | "review_gate";
+
+const PR_GOV_LOG_MAX_BYTES = clamp(
+  Number(process.env.PI_PR_GOV_LOG_MAX_BYTES ?? 5 * 1024 * 1024),
+  128 * 1024,
+  512 * 1024 * 1024,
+);
+const PR_GOV_LOG_MAX_BACKUPS = clamp(
+  Number(process.env.PI_PR_GOV_LOG_MAX_BACKUPS ?? 5),
+  1,
+  20,
+);
+const PR_GOV_LOG_ROTATE_CHECK_MS = clamp(
+  Number(process.env.PI_PR_GOV_LOG_ROTATE_CHECK_MS ?? 30_000),
+  1_000,
+  10 * 60 * 1000,
+);
 export type PrGovernanceStatus = "pass" | "fixed" | "warn" | "block" | "error";
 
 export interface PrGovernanceEvent {
@@ -18,8 +36,11 @@ export interface PrGovernanceEvent {
 export async function appendPrGovernanceEvent(event: PrGovernanceEvent): Promise<void> {
   const logPath = getPrGovernanceLogPath();
   try {
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
-    await fs.appendFile(logPath, `${JSON.stringify(event)}\n`, "utf8");
+    await appendLineWithRotation(logPath, `${JSON.stringify(event)}\n`, {
+      maxBytes: PR_GOV_LOG_MAX_BYTES,
+      maxBackups: PR_GOV_LOG_MAX_BACKUPS,
+      checkIntervalMs: PR_GOV_LOG_ROTATE_CHECK_MS,
+    });
   } catch {
     // Logging is best-effort. Never fail primary workflow.
   }

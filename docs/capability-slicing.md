@@ -10,7 +10,7 @@ Instead of loading every extension for every task, run Pi with a narrow capabili
 
 1. **Baseline (always small)**
    - Safety and mode control you almost always want.
-   - In this repo: `guardrails`, `profiles`.
+   - In this repo: `guardrails`, `profiles`, `handoff`.
 
 2. **Slice (task context)**
    - A curated extension bundle for a class of work.
@@ -35,6 +35,7 @@ Slice manifests live in `slices/*.json`.
 - `software`: generic product engineering slice for most repos
 - `autopilot`: full issue-to-PR stack
 - `daybook`: charisma-first one-on-one journaling slice
+- `sysadmin`: reliability/incident-response slice with watchdog + handoff state
 
 ## How to run
 
@@ -46,6 +47,7 @@ pictl list
 pictl meta
 pictl build
 pictl daybook
+pictl ops
 ```
 
 Low-level slice launcher:
@@ -57,6 +59,7 @@ pictl slice pi-dev --profile meta
 pictl slice software --profile execute
 pictl slice autopilot --profile ship
 pictl slice daybook --profile fast
+pictl slice sysadmin --profile execute
 ```
 
 Strict narrow mode (disable discovered skills/prompts/themes too):
@@ -87,6 +90,7 @@ Use this repository as the shared library, then choose slices per repo context:
 - Deep docs/API research session → `research`
 - Autonomous issue-to-PR run → `autopilot`
 - Journaling/daybook session → `daybook`
+- Reliability triage / host stabilization session → `ops` target (`sysadmin` slice)
 
 Keep each repository’s `.pi/settings.json` minimal; rely on slice launchers for runtime composition.
 

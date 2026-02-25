@@ -3,6 +3,7 @@
   "defaultProfile": "execute",
   "extensions": [
     "extensions/guardrails/index.ts",
-    "extensions/profiles/index.ts"
+    "extensions/profiles/index.ts",
+    "extensions/handoff/index.ts"
   ]
 }

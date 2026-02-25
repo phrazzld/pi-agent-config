@@ -3,6 +3,7 @@
   "defaultProfile": "fast",
   "extensions": [
     "extensions/profiles/index.ts",
+    "extensions/handoff/index.ts",
     "extensions/web-search/index.ts",
     "extensions/organic-workflows/index.ts",
     "extensions/daybook/index.ts",

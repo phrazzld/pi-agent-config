@@ -40,6 +40,13 @@ func TestResolveTargetNewAliases(t *testing.T) {
 	if target.Name != "autopilot" {
 		t.Fatalf("expected autopilot target, got %q", target.Name)
 	}
+	target, ok = ResolveTarget("argus")
+	if !ok {
+		t.Fatalf("expected argus alias to resolve")
+	}
+	if target.Name != "ops" {
+		t.Fatalf("expected ops target, got %q", target.Name)
+	}
 }
 
 func TestHasProfileFlag(t *testing.T) {
@@ -69,6 +76,18 @@ func TestBuildLaunchSpecSetsDefaultProfileEnv(t *testing.T) {
 		DefaultProfile: "meta",
 		Extensions:     []string{"extensions/x.ts"},
 	}
+
+	prevProfile, hadProfile := os.LookupEnv("PI_DEFAULT_PROFILE")
+	if err := os.Unsetenv("PI_DEFAULT_PROFILE"); err != nil {
+		t.Fatalf("unset PI_DEFAULT_PROFILE: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadProfile {
+			_ = os.Setenv("PI_DEFAULT_PROFILE", prevProfile)
+			return
+		}
+		_ = os.Unsetenv("PI_DEFAULT_PROFILE")
+	})
 
 	spec, err := BuildLaunchSpec(root, manifest, true, "", []string{"--model", "foo/bar"})
 	if err != nil {
@@ -117,6 +136,18 @@ func TestBuildLaunchSpecDoesNotSetProfileWhenForwardedHasProfile(t *testing.T) {
 		DefaultProfile: "meta",
 		Extensions:     []string{"extensions/x.ts"},
 	}
+
+	prevProfile, hadProfile := os.LookupEnv("PI_DEFAULT_PROFILE")
+	if err := os.Unsetenv("PI_DEFAULT_PROFILE"); err != nil {
+		t.Fatalf("unset PI_DEFAULT_PROFILE: %v", err)
+	}
+	t.Cleanup(func() {
+		if hadProfile {
+			_ = os.Setenv("PI_DEFAULT_PROFILE", prevProfile)
+			return
+		}
+		_ = os.Unsetenv("PI_DEFAULT_PROFILE")
+	})
 
 	spec, err := BuildLaunchSpec(root, manifest, false, "", []string{"--profile", "ship"})
 	if err != nil {

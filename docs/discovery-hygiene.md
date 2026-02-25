@@ -45,6 +45,9 @@ When a specific repo needs one of those skills, opt in explicitly in that repoâ€
 
 Use exact `+` includes for narrow, auditable access.
 
+Alternative in this repo: create repo-local symlink bridges under `skills/` that point to selected `~/.agents/skills/*` packages.
+This keeps discovery explicit (tracked in git) while avoiding broad global auto-discovery.
+
 ## Practical split of responsibility
 
 - **Global (`pi-agent-config`)**: reusable primitives, default slices, guardrails, shared teams/pipelines.

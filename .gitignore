@@ -3,8 +3,14 @@ auth.json
 sessions/
 .env
 .env.local
+.pi/state/
+
+# Generated local diagnostics/artifacts.
+thinktank.log
+jovial-sliding-butter/
+scripts/forensics/__pycache__/
+*.pyc
 
 # OS/editor noise.
 .DS_Store
 *.swp
-

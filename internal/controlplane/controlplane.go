@@ -65,6 +65,13 @@ var canonicalTargets = []Target{
 		Aliases:        []string{"docs", "recon"},
 	},
 	{
+		Name:           "ops",
+		Slice:          "sysadmin",
+		DefaultProfile: "execute",
+		Description:    "System reliability, incident forensics, and watchdog workflows",
+		Aliases:        []string{"sysadmin", "admin", "argus", "guardian"},
+	},
+	{
 		Name:           "daybook",
 		Slice:          "daybook",
 		DefaultProfile: "fast",

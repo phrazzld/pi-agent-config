@@ -26,6 +26,8 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `extensions/subagent`: `subagent` delegation tool (single, parallel, chain) with user/project agent scopes
 - `extensions/orchestration`: `/team` + `/pipeline` execution over declarative `agents/teams.yaml` and `agents/pipelines.yaml` with live dashboard UI + adaptive governor guardrails
 - `extensions/visibility`: runtime visibility instrumentation (single-row footer + optional widget + NDJSON logs)
+- `extensions/handoff`: per-workspace crash-recovery snapshots (`.pi/state/session-handoff.json`)
+- `extensions/ops-watchdog`: host Node-process/RSS watchdog telemetry + optional enforced command bounds
 - `extensions/daybook`: charisma-first one-on-one journaling posture with tone controls
 - `extensions/bootstrap`: opinionated `/bootstrap-repo` primitive (always plan + ambition pass + apply) for repo-local `.pi/` foundations
 
@@ -39,6 +41,12 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `skills/llm-communication`: goal-oriented prompt/agent instruction patterns
 - `skills/skill-builder`: proactive extraction of reusable workflows into skills
 - `skills/agentic-bootstrap`: synthesis-first repository bootstrap design patterns (model routing + success-criteria-driven artifacts)
+- `skills/sysadmin-ops`: host incident triage + containment + hardening workflow
+- curated external skill bridges (symlinked from `~/.agents/skills`):
+  - `agent-browser`, `dogfood`
+  - `design-taste-frontend`, `web-design-guidelines`
+  - `vercel-react-best-practices`, `vercel-composition-patterns`
+  - `skill-creator`
 
 ## Included Workflow Prompts
 - `/execute`
@@ -64,14 +72,18 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `/review-policy`
 - `/teams`, `/team`
 - `/pipelines`, `/pipeline`
+- `/orchestration`, `/orchestration-clear`
+- `/orchestration-policy`, `/orchestration-circuit`
 - `/visibility`, `/visibility-reset`
+- `/handoff`
+- `/ops-status`, `/ops-policy`, `/ops-tail`
 - `/daybook-tone`, `/daybook-kickoff`
 - `/bootstrap-repo`
 
 ## Included Delegation Tooling
 - `subagent` tool (from `extensions/subagent`)
 - orchestration commands/tools: `/team`, `/pipeline`, `team_run`, `pipeline_run`
-- default agent profiles in `agents/` (`scout`, `planner`, `plan-reviewer`, `worker`, `reviewer`, `red-team`, `documenter`, groom specialists, plus meta-domain experts)
+- default agent profiles in `agents/` (`scout`, `planner`, `plan-reviewer`, `worker`, `reviewer`, `red-team`, `documenter`, `sysadmin-sentinel`, groom specialists, plus meta-domain experts)
 - team and pipeline data in `agents/teams.yaml` + `agents/pipelines.yaml`
 
 ## Setup
@@ -122,6 +134,7 @@ pictl build
 pictl autopilot
 pictl research
 pictl daybook
+pictl ops
 ```
 
 Default policy:
@@ -154,6 +167,11 @@ See:
 - `docs/adaptive-orchestration-governor-v1.md`
 - `docs/primitives-cookbook.md`
 - `docs/daybook-model-evaluation.md`
+- `docs/sysadmin-slice-v1.md`
+- `docs/incidents/2026-02-25-memory-runaway.md`
+- `docs/orchestration-resilience-options-2026-02-25.md`
+- `docs/opinionated-framework-roadmap.md`
+- `docs/adr/ADR-0001-orchestration-admission-control.md`
 - `docs/workflow-first-slice-design.md`
 - `docs/autopilot-pipeline.md`
 - `docs/autopilot-flywheel.md`
@@ -196,6 +214,33 @@ Optional orchestration governor knobs:
 - `PI_ORCH_GOV_EMERGENCY_FUSE_SECONDS` (default: `14400`)
 - `PI_ORCH_GOV_MAX_COST_USD` (optional)
 - `PI_ORCH_GOV_MAX_TOKENS` (optional)
+
+Optional orchestration admission knobs:
+- `PI_ORCH_ADM_MAX_RUNS` (default: `6`)
+- `PI_ORCH_ADM_MAX_SLOTS` (default: `16`)
+- `PI_ORCH_ADM_MAX_DEPTH` (default: `2`)
+- `PI_ORCH_ADM_BREAKER_COOLDOWN_MS` (default: `120000`)
+- `PI_ORCH_ADM_GAP_MAX` (default: `24`)
+- `PI_ORCH_ADM_GAP_RESET_QUIET_MS` (default: `180000`)
+- `PI_ORCH_ADM_RUN_TTL_MS` (default: `1800000`)
+- `PI_ORCH_ADM_SLOT_TTL_MS` (default: `600000`)
+- `PI_ORCH_ADM_STATE_PATH` (default: `~/.pi/agent/state/orchestration-admission-state.json`)
+- `PI_ORCH_ADM_EVENT_LOG_PATH` (default: `~/.pi/agent/logs/orchestration-admission.ndjson`)
+- `PI_ORCH_ADM_EVENT_LOG_MAX_BYTES` (default: `10485760`)
+- `PI_ORCH_ADM_EVENT_LOG_MAX_BACKUPS` (default: `5`)
+- `PI_ORCH_ADM_EVENT_LOG_ROTATE_CHECK_MS` (default: `15000`)
+- `PI_ORCH_ADM_PRESSURE_LOG_PATH` (default: `~/.pi/agent/logs/ops-watchdog.ndjson`)
+
+Optional watchdog/handoff log knobs:
+- `PI_OPS_WATCHDOG_ENABLE_NESTED` (default: `false`)
+- `PI_OPS_WATCHDOG_LOG_MAX_BYTES` (default: `10485760`)
+- `PI_OPS_WATCHDOG_LOG_MAX_BACKUPS` (default: `5`)
+- `PI_OPS_WATCHDOG_LOG_ROTATE_CHECK_MS` (default: `15000`)
+- `PI_HANDOFF_ENABLE_NESTED` (default: `false`)
+- `PI_HANDOFF_EVENT_LOG_MAX_BYTES` (default: `5242880`)
+- `PI_HANDOFF_EVENT_LOG_MAX_BACKUPS` (default: `3`)
+- `PI_HANDOFF_EVENT_LOG_ROTATE_CHECK_MS` (default: `10000`)
+- `PI_VISIBILITY_LOG_MAX_BYTES` / `PI_PR_GOV_LOG_MAX_BYTES` / `PI_WEB_SEARCH_LOG_MAX_BYTES` (default: `10485760` / `5242880` / `10485760`)
 
 ## Extension Tests (lightweight harness)
 ```bash

@@ -13,8 +13,9 @@ These are the only interactive picker targets:
 - `autopilot` — bounded issue-to-PR execution workflow
 - `research` — deep docs/retrieval investigations
 - `daybook` — charisma-first one-on-one journaling
+- `ops` — system reliability, incident forensics, and watchdog workflows
 
-Legacy names still resolve as aliases (`delivery`, `software`, `ship`, etc.).
+Legacy names still resolve as aliases (`delivery`, `software`, `ship`, `sysadmin`, `argus`, etc.).
 
 ## Commands
 
@@ -40,6 +41,7 @@ pictl build
 pictl autopilot
 pictl research
 pictl daybook
+pictl ops
 ```
 
 Low-level slice launcher:
@@ -49,6 +51,7 @@ pictl slices
 pictl slice pi-dev --profile meta
 pictl slice software --profile execute
 pictl slice daybook --profile fast
+pictl slice sysadmin --profile execute
 pictl slice --strict research --profile meta
 ```
 
@@ -72,6 +75,7 @@ go run ./cmd/pictl meta
 | `autopilot` | `autopilot` | `ship` |
 | `research` | `research` | `meta` (`ultrathink`) |
 | `daybook` | `daybook` | `fast` |
+| `ops` | `sysadmin` | `execute` |
 
 ## Profile naming guidance
 
@@ -96,6 +100,7 @@ alias ibuild='pictl build'
 alias iauto='pictl autopilot'
 alias iresearch='pictl research'
 alias idaybook='pictl daybook'
+alias iops='pictl ops'
 ```
 
 ## Strategic rule

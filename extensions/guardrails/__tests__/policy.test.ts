@@ -29,4 +29,30 @@ describe("guardrails policy", () => {
     const decision = evaluateCommandSafety("git commit --amend --no-edit");
     expect(decision.block).toBe(true);
   });
+
+  test("blocks nested non-interactive pi invocation", () => {
+    const decision = evaluateCommandSafety(
+      'pi --mode json --no-session -p \"say hi\"'
+    );
+    expect(decision.block).toBe(true);
+    expect(decision.reason).toContain("nested non-interactive `pi`");
+  });
+
+  test("allows nested pi invocation when override is enabled", () => {
+    const prev = process.env.PI_GUARDRAILS_ALLOW_NESTED_PI;
+    process.env.PI_GUARDRAILS_ALLOW_NESTED_PI = "true";
+    try {
+      const decision = evaluateCommandSafety(
+        'pi --mode json --no-session -p \"say hi\"'
+      );
+      expect(decision.block).toBe(false);
+    } finally {
+      if (prev === undefined) {
+        delete process.env.PI_GUARDRAILS_ALLOW_NESTED_PI;
+      } else {
+        process.env.PI_GUARDRAILS_ALLOW_NESTED_PI = prev;
+      }
+    }
+  });
+
 });

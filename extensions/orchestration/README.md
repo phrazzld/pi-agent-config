@@ -24,6 +24,8 @@ Falls back to global runtime config:
 - `/pipeline <name> <goal> [--scope user|project|both] [--gov-mode observe|warn|enforce]`
 - `/orchestration` — refresh last dashboard snapshot
 - `/orchestration-clear` — clear widget/status immediately
+- `/orchestration-policy` — show admission policy limits/paths
+- `/orchestration-circuit` — show live admission/circuit status
 
 Governor overrides also support:
 - `--gov-max-cost <usd>`
@@ -36,6 +38,8 @@ Governor overrides also support:
 - `pipeline_run`
 
 These enable LLM-driven orchestration while preserving dashboard visibility.
+All orchestration tool paths are now protected by admission control and can fail closed
+with structured error codes when limits are exceeded.
 
 ## Adaptive governor (v1)
 
@@ -59,6 +63,22 @@ Env knobs:
 - `PI_ORCH_GOV_EMERGENCY_FUSE_SECONDS`
 - `PI_ORCH_GOV_MAX_COST_USD`
 - `PI_ORCH_GOV_MAX_TOKENS`
+
+Admission knobs:
+- `PI_ORCH_ADM_MAX_RUNS`
+- `PI_ORCH_ADM_MAX_SLOTS`
+- `PI_ORCH_ADM_MAX_DEPTH`
+- `PI_ORCH_ADM_BREAKER_COOLDOWN_MS`
+- `PI_ORCH_ADM_GAP_MAX`
+- `PI_ORCH_ADM_GAP_RESET_QUIET_MS`
+- `PI_ORCH_ADM_RUN_TTL_MS`
+- `PI_ORCH_ADM_SLOT_TTL_MS`
+- `PI_ORCH_ADM_STATE_PATH`
+- `PI_ORCH_ADM_EVENT_LOG_PATH`
+- `PI_ORCH_ADM_EVENT_LOG_MAX_BYTES`
+- `PI_ORCH_ADM_EVENT_LOG_MAX_BACKUPS`
+- `PI_ORCH_ADM_EVENT_LOG_ROTATE_CHECK_MS`
+- `PI_ORCH_ADM_PRESSURE_LOG_PATH`
 
 ## UI
 

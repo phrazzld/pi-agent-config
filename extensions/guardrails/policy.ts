@@ -47,6 +47,13 @@ const RULES: GuardrailRule[] = [
     reason: "Blocked: `git commit --amend` rewrites commit history.",
   },
   {
+    name: "pi-nested-noninteractive",
+    pattern:
+      /\bpi\b(?!ctl)\b[^\n]*(--mode\b|--no-session\b|-p\b|--append-system-prompt\b|--tools\b)/i,
+    reason:
+      "Blocked: nested non-interactive `pi` invocation from inside Pi can trigger process storms. Use built-in orchestration tools (`team_run`, `pipeline_run`, `subagent`) instead, or run the nested CLI manually outside this session.",
+  },
+  {
     name: "gh-pr-merge",
     pattern: /\bgh\s+pr\s+merge\b/i,
     reason:
@@ -60,7 +67,14 @@ export function evaluateCommandSafety(command: string): GuardrailDecision {
     return { block: false };
   }
 
+  const allowNestedPi =
+    process.env.PI_GUARDRAILS_ALLOW_NESTED_PI?.toLowerCase() === "true";
+
   for (const rule of RULES) {
+    if (allowNestedPi && rule.name === "pi-nested-noninteractive") {
+      continue;
+    }
+
     if (rule.pattern.test(text)) {
       return {
         block: true,

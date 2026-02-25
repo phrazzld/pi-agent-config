@@ -15,14 +15,16 @@ Start with **what you are trying to do now**, then load the smallest capability 
 | Autonomous issue-to-PR | "Do I want bounded automation through PR readiness?" | `autopilot` | `autopilot` | checkpoints, governance, orchestration, visibility |
 | Deep investigation | "Am I mostly researching docs/APIs/options?" | `research` | `research` | retrieval, subagent, visibility |
 | Journaling/daybook | "Am I doing reflective one-on-one writing?" | `daybook` | `daybook` | daybook tone layer, selective retrieval, memory search, visibility |
+| Host reliability / incident response | "Am I triaging machine/process instability?" | `ops` | `sysadmin` | watchdog telemetry, crash handoff state, bounded orchestration, forensic tooling |
 
 ## Usage decision tree
 
 1. Are you modifying `pi-agent-config` or `.pi` architecture? → `pictl meta`
-2. Else, are you journaling/reflection-first? → `pictl daybook`
-3. Else, are you running issue-to-PR automation with checkpoints? → `pictl autopilot`
-4. Else, are you doing primarily research? → `pictl research`
-5. Else (default coding work) → `pictl build`
+2. Else, are you triaging host stability or incident forensics? → `pictl ops`
+3. Else, are you journaling/reflection-first? → `pictl daybook`
+4. Else, are you running issue-to-PR automation with checkpoints? → `pictl autopilot`
+5. Else, are you doing primarily research? → `pictl research`
+6. Else (default coding work) → `pictl build`
 
 ## Why only these targets
 

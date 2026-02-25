@@ -24,19 +24,19 @@ const PROFILES: Record<ProfileName, Profile> = {
     thinking: "xhigh",
     tools: ["read", "bash", "grep", "find", "ls", "web_search"],
     instructions:
-      "Mode: ultrathink. Prioritize deep analysis, architecture quality, and risk surfacing before coding. Operate with convention over configuration and Unix-style composition (small focused primitives combined into workflows). Use teams/subagents at your discretion when work is non-trivial, cross-functional, or ambiguous; skip orchestration for trivial factual asks or tiny edits. For meta/config architecture work, proactively invoke team_run for meta-council, then synthesize into a concise recommendation. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
+      "Mode: ultrathink. Prioritize deep analysis, architecture quality, and risk surfacing before coding. Operate with convention over configuration and Unix-style composition (small focused primitives combined into workflows). Use teams/subagents at your discretion when work is non-trivial, cross-functional, or ambiguous; skip orchestration for trivial factual asks or tiny edits. For meta/config architecture work in top-level sessions, proactively invoke team_run for meta-council, then synthesize into a concise recommendation. Never start nested team_run/pipeline_run loops from delegated agent runs unless the user explicitly asks. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
   },
   execute: {
     thinking: "medium",
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search"],
     instructions:
-      "Mode: execute. Deliver requested changes with focused scope, direct implementation, and concise verification. Operate with convention over configuration and Unix-style composition (small focused primitives combined into workflows). Use teams/subagents opportunistically for non-trivial multi-step work, risky changes, or when parallel specialist analysis improves quality; avoid orchestration overhead for tiny edits. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
+      "Mode: execute. Deliver requested changes with focused scope, direct implementation, and concise verification. Operate with convention over configuration and Unix-style composition (small focused primitives combined into workflows). Use teams/subagents opportunistically for non-trivial multi-step work, risky changes, or when parallel specialist analysis improves quality; avoid orchestration overhead for tiny edits. Avoid nested team_run/pipeline_run loops from delegated agent runs unless the user explicitly asks. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
   },
   ship: {
     thinking: "high",
     tools: ["read", "bash", "edit", "write", "grep", "find", "ls", "web_search"],
     instructions:
-      "Mode: ship. Complete work end-to-end, run checks, and leave PR-ready output with explicit residual risk. Operate with convention over configuration and Unix-style composition (small focused primitives combined into workflows). Prefer team/pipeline orchestration for substantial work that benefits from planning/review/specialists; keep direct execution for straightforward small tasks. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
+      "Mode: ship. Complete work end-to-end, run checks, and leave PR-ready output with explicit residual risk. Operate with convention over configuration and Unix-style composition (small focused primitives combined into workflows). Prefer team/pipeline orchestration for substantial work that benefits from planning/review/specialists; keep direct execution for straightforward small tasks. Avoid nested team_run/pipeline_run loops from delegated agent runs unless the user explicitly asks. Treat user phrases like 'ask the council' or 'use everything at your disposal' as explicit permission to orchestrate.",
   },
   fast: {
     thinking: "low",
@@ -192,11 +192,21 @@ async function applyProfile(
   pi.setThinkingLevel(profile.thinking);
 
   const availableTools = new Set(pi.getAllTools().map((tool) => tool.name));
+  const currentlyActiveTools = new Set(
+    pi.getActiveTools().map((tool) => String(tool))
+  );
+
+  const hasExplicitToolScope = currentlyActiveTools.size > 0;
+  const selectableTools = hasExplicitToolScope
+    ? new Set(
+        Array.from(currentlyActiveTools).filter((tool) => availableTools.has(tool))
+      )
+    : availableTools;
 
   const enabledTools: string[] = [];
   const seen = new Set<string>();
-  const includeIfAvailable = (tool: string) => {
-    if (!availableTools.has(tool) || seen.has(tool)) {
+  const includeIfSelectable = (tool: string) => {
+    if (!availableTools.has(tool) || !selectableTools.has(tool) || seen.has(tool)) {
       return;
     }
     seen.add(tool);
@@ -204,10 +214,10 @@ async function applyProfile(
   };
 
   for (const tool of profile.tools) {
-    includeIfAvailable(tool);
+    includeIfSelectable(tool);
   }
   for (const tool of BASE_CAPABILITY_TOOLS) {
-    includeIfAvailable(tool);
+    includeIfSelectable(tool);
   }
 
   if (enabledTools.length > 0) {
@@ -216,6 +226,9 @@ async function applyProfile(
 
   const missingBaseCapabilities = BASE_CAPABILITY_TOOLS.filter(
     (tool) => !availableTools.has(tool)
+  );
+  const constrainedBaseCapabilities = BASE_CAPABILITY_TOOLS.filter(
+    (tool) => availableTools.has(tool) && !selectableTools.has(tool)
   );
 
   pi.appendEntry<ProfileStateEntry>("profile-state", { name: profileName });
@@ -232,6 +245,15 @@ async function applyProfile(
         ", "
       )}`,
       severity
+    );
+  }
+
+  if (constrainedBaseCapabilities.length > 0) {
+    ctx.ui.notify(
+      `Profile ${display}: base capabilities blocked by current tool scope -> ${constrainedBaseCapabilities.join(
+        ", "
+      )}`,
+      "info"
     );
   }
 

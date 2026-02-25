@@ -1,10 +1,10 @@
-import { existsSync, mkdirSync } from "node:fs";
-import { appendFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
+
+import { appendLineWithRotation } from "../shared/log-rotation";
 
 interface UsageStats {
   tools: Map<string, number>;
@@ -31,6 +31,21 @@ const WIDGET_ID = "visibility";
 const MESSAGE_TYPE = "visibility-summary";
 const EMIT_RUN_SUMMARY = false;
 const FOOTER_SEP = "  ";
+const LOG_MAX_BYTES = clampInt(
+  Number(process.env.PI_VISIBILITY_LOG_MAX_BYTES ?? 10 * 1024 * 1024),
+  128 * 1024,
+  512 * 1024 * 1024
+);
+const LOG_MAX_BACKUPS = clampInt(
+  Number(process.env.PI_VISIBILITY_LOG_MAX_BACKUPS ?? 5),
+  1,
+  20
+);
+const LOG_ROTATE_CHECK_MS = clampInt(
+  Number(process.env.PI_VISIBILITY_LOG_ROTATE_CHECK_MS ?? 30_000),
+  1_000,
+  10 * 60 * 1000
+);
 
 const ICONS = {
   repo: "",
@@ -603,23 +618,21 @@ function resetSessionState(state: UsageStats): void {
 
 async function appendPrimitiveUsageLog(entry: unknown): Promise<void> {
   const configDir = getConfigDir();
-  const logsDir = path.join(configDir, "logs");
-  if (!existsSync(logsDir)) {
-    mkdirSync(logsDir, { recursive: true });
-  }
-
-  const logPath = path.join(logsDir, LOG_FILE_NAME);
+  const logPath = path.join(configDir, "logs", LOG_FILE_NAME);
   const line = `${JSON.stringify(entry)}\n`;
 
-  try {
-    await appendFile(logPath, line, "utf8");
-  } catch {
-    try {
-      await writeFile(logPath, line, "utf8");
-    } catch {
-      // swallow logging errors
-    }
+  await appendLineWithRotation(logPath, line, {
+    maxBytes: LOG_MAX_BYTES,
+    maxBackups: LOG_MAX_BACKUPS,
+    checkIntervalMs: LOG_ROTATE_CHECK_MS,
+  }).catch(() => undefined);
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
   }
+  return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
 function getConfigDir(): string {

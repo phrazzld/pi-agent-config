@@ -1,9 +1,7 @@
-import { appendFile, mkdir } from "node:fs/promises";
-import path from "node:path";
-
 import type { SearchRequest, SearchResult, ProviderAdapter } from "./provider-adapter";
 import type { QueryCache } from "./cache";
 import { dedupeByCanonicalUrl, normalizeQuery } from "./query-utils";
+import { appendLineWithRotation } from "../../extensions/shared/log-rotation";
 
 export interface OrchestratorOptions {
   cache?: QueryCache<SearchResult[]>;
@@ -15,6 +13,22 @@ export interface SearchRunMeta {
   providerUsed: ProviderAdapter["name"] | null;
   providerChain: ProviderAdapter["name"][];
 }
+
+const WEB_SEARCH_LOG_MAX_BYTES = clampInt(
+  Number(process.env.PI_WEB_SEARCH_LOG_MAX_BYTES ?? 10 * 1024 * 1024),
+  128 * 1024,
+  512 * 1024 * 1024,
+);
+const WEB_SEARCH_LOG_MAX_BACKUPS = clampInt(
+  Number(process.env.PI_WEB_SEARCH_LOG_MAX_BACKUPS ?? 5),
+  1,
+  20,
+);
+const WEB_SEARCH_LOG_ROTATE_CHECK_MS = clampInt(
+  Number(process.env.PI_WEB_SEARCH_LOG_ROTATE_CHECK_MS ?? 30_000),
+  1_000,
+  10 * 60 * 1000,
+);
 
 interface LogEvent {
   ts: string;
@@ -146,7 +160,17 @@ export class WebSearchOrchestrator {
       detail: input.detail,
     };
 
-    await mkdir(path.dirname(this.logPath), { recursive: true });
-    await appendFile(this.logPath, `${JSON.stringify(payload)}\n`, "utf8");
+    await appendLineWithRotation(this.logPath, `${JSON.stringify(payload)}\n`, {
+      maxBytes: WEB_SEARCH_LOG_MAX_BYTES,
+      maxBackups: WEB_SEARCH_LOG_MAX_BACKUPS,
+      checkIntervalMs: WEB_SEARCH_LOG_ROTATE_CHECK_MS,
+    });
   }
+}
+
+function clampInt(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.max(min, Math.min(max, Math.floor(value)));
 }

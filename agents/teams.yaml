@@ -53,3 +53,8 @@ meta-council:
   - meta-team-ui-expert
   - meta-theme-expert
   - meta-keybindings-expert
+
+ops-response:
+  - sysadmin-sentinel
+  - planner
+  - reviewer

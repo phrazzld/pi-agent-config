@@ -61,7 +61,8 @@ Provides retrieval-first web research with citations and recency controls.
 - Pi extension entrypoint: `extensions/web-search/index.ts`
 - CLI entrypoint (optional debug): `skills/web-search/cli.ts`
 - Cache: `cache/web-search-cache.json` (TTL via `WEB_SEARCH_TTL_MS`)
-- Logs: `logs/web-search.ndjson`
+- Logs: `logs/web-search.ndjson` (size-rotated)
+- `PI_WEB_SEARCH_LOG_MAX_BYTES` / `PI_WEB_SEARCH_LOG_MAX_BACKUPS` / `PI_WEB_SEARCH_LOG_ROTATE_CHECK_MS`
 - Cost controls:
-- `WEB_SEARCH_MAX_RESULTS` caps results per query
-- Cache dedupe prevents repeated provider calls for same normalized query
+  - `WEB_SEARCH_MAX_RESULTS` caps results per query
+  - Cache dedupe prevents repeated provider calls for same normalized query

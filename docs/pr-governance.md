@@ -31,3 +31,6 @@ This log is local-first and can be indexed by memory ingestion for trend reflect
 - `PI_PR_GOVERNANCE_AUTOFIX` (default `true`)
 - `PI_PR_LINT_TIMEOUT_MS` (default `120000`)
 - `PI_PR_TITLE_MAX_CHARS` (default `72`)
+- `PI_PR_GOV_LOG_MAX_BYTES` (default `5242880`)
+- `PI_PR_GOV_LOG_MAX_BACKUPS` (default `5`)
+- `PI_PR_GOV_LOG_ROTATE_CHECK_MS` (default `30000`)

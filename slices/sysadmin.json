@@ -1,0 +1,14 @@
+{
+  "description": "System reliability and incident-response slice with watchdog telemetry, crash handoff state, and bounded orchestration.",
+  "defaultProfile": "execute",
+  "extensions": [
+    "extensions/guardrails/index.ts",
+    "extensions/profiles/index.ts",
+    "extensions/handoff/index.ts",
+    "extensions/ops-watchdog/index.ts",
+    "extensions/subagent/index.ts",
+    "extensions/orchestration/index.ts",
+    "extensions/visibility/index.ts",
+    "extensions/web-search/index.ts"
+  ]
+}

@@ -9,6 +9,13 @@ import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { discoverAgents, type AgentConfig, type AgentScope } from "../subagent/agents";
+import {
+  OrchestrationAdmissionController,
+  currentOrchestrationDepth,
+  type AdmissionRejection,
+  type AdmissionRunGrant,
+  type AdmissionSlotGrant,
+} from "./admission";
 import { loadOrchestrationConfig, type PipelineSpec, type TeamMap, type PipelineMap } from "./config";
 import {
   AdaptiveGovernor,
@@ -26,6 +33,7 @@ const LOCK_RETRY_MAX_ATTEMPTS = 4;
 const LOCK_RETRY_BASE_DELAY_MS = 120;
 const SYNTHESIS_MAX_OUTPUT_CHARS_PER_MEMBER = 4_000;
 const SYNTHESIS_MAX_TOTAL_CHARS = 28_000;
+const ADMISSION_ERROR_PREFIX = "[orchestration-admission]";
 
 const GOVERNOR_MODE_ENUM = StringEnum(["observe", "warn", "enforce"] as const);
 
@@ -106,10 +114,25 @@ interface PipelineExecutionResult {
   results: AgentRunResult[];
 }
 
+class OrchestrationGuardError extends Error {
+  code: string;
+  retryAfterMs?: number;
+  details?: Record<string, unknown>;
+
+  constructor(rejection: AdmissionRejection) {
+    super(`${ADMISSION_ERROR_PREFIX} ${rejection.code}: ${rejection.reason}`);
+    this.name = "OrchestrationGuardError";
+    this.code = rejection.code;
+    this.retryAfterMs = rejection.retryAfterMs;
+    this.details = rejection.details;
+  }
+}
+
 export default function orchestrationExtension(pi: ExtensionAPI): void {
   const dashboardKey = "orchestration-dashboard";
   let lastDashboard: DashboardState | null = null;
   let dashboardClearTimer: ReturnType<typeof setTimeout> | null = null;
+  const admission = new OrchestrationAdmissionController();
 
   pi.registerMessageRenderer(ORCHESTRATION_MESSAGE_TYPE, (message, _options, theme) => {
     const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
@@ -121,6 +144,26 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
     const content = typeof message.content === "string" ? message.content : String(message.content ?? "");
     const title = `${theme.fg("toolTitle", theme.bold("orchestration "))}${theme.fg("accent", "synthesis")}`;
     return new Text(`${title}\n${content}`, 0, 0);
+  });
+
+  pi.on("tool_call", async (event) => {
+    if (event.toolName === "subagent") {
+      const gate = await admission.evaluateToolGate("subagent", currentOrchestrationDepth());
+      if (gate !== true) {
+        return {
+          block: true,
+          reason: formatGuardBlockReason(gate),
+        };
+      }
+    }
+
+    await admission.recordToolCall(event.toolName);
+    return undefined;
+  });
+
+  pi.on("tool_result", async (event) => {
+    await admission.recordToolResult(event.toolName);
+    return undefined;
   });
 
   pi.registerCommand("teams", {
@@ -164,40 +207,49 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const result = await runTeam(pi, ctx, parsed.name, goal, {
-        agentScope: parsed.scope,
-        concurrency: parsed.concurrency,
-        governor: parsed.governor,
-        onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
-      });
-
-      if (!result) {
-        return;
-      }
-
-      const summary = formatTeamSummary(result);
-      pi.sendMessage({
-        customType: ORCHESTRATION_MESSAGE_TYPE,
-        content: summary,
-        display: true,
-        details: result,
-      });
-
-      scheduleDashboardAutoClear(ctx);
-
-      const synthesis = await synthesizeTeamExecution(ctx, result, parsed.scope);
-      if (synthesis) {
-        pi.sendMessage({
-          customType: ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE,
-          content: synthesis.output,
-          display: true,
-          details: {
-            team: result.team,
-            goal: result.goal,
-            synthesizer: synthesis.agent,
-            usage: synthesis.usage,
-          },
+      try {
+        const result = await runTeam(pi, ctx, parsed.name, goal, {
+          agentScope: parsed.scope,
+          concurrency: parsed.concurrency,
+          governor: parsed.governor,
+          admission,
+          onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
         });
+
+        if (!result) {
+          return;
+        }
+
+        const summary = formatTeamSummary(result);
+        pi.sendMessage({
+          customType: ORCHESTRATION_MESSAGE_TYPE,
+          content: summary,
+          display: true,
+          details: result,
+        });
+
+        scheduleDashboardAutoClear(ctx);
+
+        const synthesis = await synthesizeTeamExecution(ctx, result, parsed.scope);
+        if (synthesis) {
+          pi.sendMessage({
+            customType: ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE,
+            content: synthesis.output,
+            display: true,
+            details: {
+              team: result.team,
+              goal: result.goal,
+              synthesizer: synthesis.agent,
+              usage: synthesis.usage,
+            },
+          });
+        }
+      } catch (error) {
+        if (error instanceof OrchestrationGuardError) {
+          ctx.ui.notify(formatGuardUiMessage(error), "warning");
+          return;
+        }
+        throw error;
       }
     },
   });
@@ -217,25 +269,34 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const result = await runPipeline(pi, ctx, parsed.name, goal, {
-        agentScope: parsed.scope,
-        governor: parsed.governor,
-        onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
-      });
+      try {
+        const result = await runPipeline(pi, ctx, parsed.name, goal, {
+          agentScope: parsed.scope,
+          governor: parsed.governor,
+          admission,
+          onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
+        });
 
-      if (!result) {
-        return;
+        if (!result) {
+          return;
+        }
+
+        const summary = formatPipelineSummary(result);
+        pi.sendMessage({
+          customType: ORCHESTRATION_MESSAGE_TYPE,
+          content: summary,
+          display: true,
+          details: result,
+        });
+
+        scheduleDashboardAutoClear(ctx);
+      } catch (error) {
+        if (error instanceof OrchestrationGuardError) {
+          ctx.ui.notify(formatGuardUiMessage(error), "warning");
+          return;
+        }
+        throw error;
       }
-
-      const summary = formatPipelineSummary(result);
-      pi.sendMessage({
-        customType: ORCHESTRATION_MESSAGE_TYPE,
-        content: summary,
-        display: true,
-        details: result,
-      });
-
-      scheduleDashboardAutoClear(ctx);
     },
   });
 
@@ -259,6 +320,54 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
       clearDashboardTimer();
       clearDashboard(ctx, dashboardKey);
       ctx.ui.notify("Cleared orchestration dashboard.", "info");
+    },
+  });
+
+  pi.registerCommand("orchestration-policy", {
+    description: "Show orchestration admission policy and limits",
+    handler: async (_args, ctx) => {
+      const policy = admission.getPolicy();
+      const lines = [
+        "orchestration admission policy",
+        `- max runs: ${policy.maxInFlightRuns}`,
+        `- max slots: ${policy.maxInFlightSlots}`,
+        `- max depth: ${policy.maxDepth}`,
+        `- breaker cooldown ms: ${policy.breakerCooldownMs}`,
+        `- max call/result gap: ${policy.maxCallResultGap}`,
+        `- gap quiet reset ms: ${policy.gapResetQuietMs}`,
+        `- run ttl ms: ${policy.runLeaseTtlMs}`,
+        `- slot ttl ms: ${policy.slotLeaseTtlMs}`,
+        `- state path: ${policy.statePath}`,
+        `- event log: ${policy.eventLogPath}`,
+        `- event log max bytes: ${policy.eventLogMaxBytes}`,
+        `- event log backups: ${policy.eventLogMaxBackups}`,
+        `- event log rotate check ms: ${policy.eventLogRotateCheckMs}`,
+        `- pressure log: ${policy.pressureLogPath}`,
+      ];
+      ctx.ui.notify(lines.join("\n"), "info");
+    },
+  });
+
+  pi.registerCommand("orchestration-circuit", {
+    description: "Show orchestration circuit/admission runtime status",
+    handler: async (_args, ctx) => {
+      const status = await admission.getStatus();
+      const lines = [
+        "orchestration circuit status",
+        `- circuit: ${status.circuit.status}${status.circuit.reason ? ` (${status.circuit.reason})` : ""}`,
+        `- details: ${status.circuit.details || "none"}`,
+        `- active runs: ${status.activeRuns}`,
+        `- active slots: ${status.activeSlots}`,
+        `- max call/result gap: ${status.maxGap}`,
+      ];
+      if (status.pressure) {
+        lines.push(
+          `- pressure: ${status.pressure.severity} node=${status.pressure.nodeCount} rss=${status.pressure.nodeRssMb}MB`,
+        );
+      } else {
+        lines.push("- pressure: unavailable");
+      }
+      ctx.ui.notify(lines.join("\n"), "info");
     },
   });
 
@@ -289,35 +398,53 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
     description: "Execute a configured team in parallel and return member outputs.",
     parameters: TEAM_TOOL_PARAMS,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const result = await runTeam(pi, ctx, params.team, params.goal, {
-        agentScope: (params.agentScope ?? "both") as AgentScope,
-        concurrency: params.concurrency ?? 4,
-        governor: toGovernorOverrides(params),
-        signal,
-        onDashboardUpdate: (dashboard) => {
-          onDashboardUpdate(ctx, dashboard);
-          onUpdate?.({
-            content: [{ type: "text", text: summarizeDashboardProgress(dashboard) }],
-            details: dashboard,
-          });
-        },
-      });
+      try {
+        const result = await runTeam(pi, ctx, params.team, params.goal, {
+          agentScope: (params.agentScope ?? "both") as AgentScope,
+          concurrency: params.concurrency ?? 4,
+          governor: toGovernorOverrides(params),
+          admission,
+          signal,
+          onDashboardUpdate: (dashboard) => {
+            onDashboardUpdate(ctx, dashboard);
+            onUpdate?.({
+              content: [{ type: "text", text: summarizeDashboardProgress(dashboard) }],
+              details: dashboard,
+            });
+          },
+        });
 
-      if (!result) {
+        if (!result) {
+          return {
+            content: [{ type: "text", text: `Failed to run team ${params.team}.` }],
+            details: { ok: false, team: params.team },
+            isError: true,
+          };
+        }
+
+        scheduleDashboardAutoClear(ctx);
+
         return {
-          content: [{ type: "text", text: `Failed to run team ${params.team}.` }],
-          details: { ok: false, team: params.team },
-          isError: true,
+          content: [{ type: "text", text: formatTeamSummary(result) }],
+          details: result,
+          isError: result.results.some((entry) => entry.status === "failed"),
         };
+      } catch (error) {
+        if (error instanceof OrchestrationGuardError) {
+          return {
+            content: [{ type: "text", text: formatGuardToolMessage(error) }],
+            details: {
+              ok: false,
+              team: params.team,
+              code: error.code,
+              retryAfterMs: error.retryAfterMs,
+              ...error.details,
+            },
+            isError: true,
+          };
+        }
+        throw error;
       }
-
-      scheduleDashboardAutoClear(ctx);
-
-      return {
-        content: [{ type: "text", text: formatTeamSummary(result) }],
-        details: result,
-        isError: result.results.some((entry) => entry.status === "failed"),
-      };
     },
     renderCall(args, theme) {
       return new Text(
@@ -334,34 +461,52 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
     description: "Execute a configured pipeline sequentially and return step outputs.",
     parameters: PIPELINE_TOOL_PARAMS,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
-      const result = await runPipeline(pi, ctx, params.pipeline, params.goal, {
-        agentScope: (params.agentScope ?? "both") as AgentScope,
-        governor: toGovernorOverrides(params),
-        signal,
-        onDashboardUpdate: (dashboard) => {
-          onDashboardUpdate(ctx, dashboard);
-          onUpdate?.({
-            content: [{ type: "text", text: summarizeDashboardProgress(dashboard) }],
-            details: dashboard,
-          });
-        },
-      });
+      try {
+        const result = await runPipeline(pi, ctx, params.pipeline, params.goal, {
+          agentScope: (params.agentScope ?? "both") as AgentScope,
+          governor: toGovernorOverrides(params),
+          admission,
+          signal,
+          onDashboardUpdate: (dashboard) => {
+            onDashboardUpdate(ctx, dashboard);
+            onUpdate?.({
+              content: [{ type: "text", text: summarizeDashboardProgress(dashboard) }],
+              details: dashboard,
+            });
+          },
+        });
 
-      if (!result) {
+        if (!result) {
+          return {
+            content: [{ type: "text", text: `Failed to run pipeline ${params.pipeline}.` }],
+            details: { ok: false, pipeline: params.pipeline },
+            isError: true,
+          };
+        }
+
+        scheduleDashboardAutoClear(ctx);
+
         return {
-          content: [{ type: "text", text: `Failed to run pipeline ${params.pipeline}.` }],
-          details: { ok: false, pipeline: params.pipeline },
-          isError: true,
+          content: [{ type: "text", text: formatPipelineSummary(result) }],
+          details: result,
+          isError: result.results.some((entry) => entry.status === "failed"),
         };
+      } catch (error) {
+        if (error instanceof OrchestrationGuardError) {
+          return {
+            content: [{ type: "text", text: formatGuardToolMessage(error) }],
+            details: {
+              ok: false,
+              pipeline: params.pipeline,
+              code: error.code,
+              retryAfterMs: error.retryAfterMs,
+              ...error.details,
+            },
+            isError: true,
+          };
+        }
+        throw error;
       }
-
-      scheduleDashboardAutoClear(ctx);
-
-      return {
-        content: [{ type: "text", text: formatPipelineSummary(result) }],
-        details: result,
-        isError: result.results.some((entry) => entry.status === "failed"),
-      };
     },
     renderCall(args, theme) {
       return new Text(
@@ -421,6 +566,7 @@ async function runTeam(
     agentScope: AgentScope;
     concurrency: number;
     governor?: GovernorOverrides;
+    admission: OrchestrationAdmissionController;
     signal?: AbortSignal;
     onDashboardUpdate: (state: DashboardState) => void;
   },
@@ -445,6 +591,20 @@ async function runTeam(
     return null;
   }
 
+  const limit = Math.max(1, Math.min(8, options.concurrency));
+  const runId = createRunId("team_run", teamName);
+  const depth = currentOrchestrationDepth();
+  const preflight = await options.admission.preflightRun({
+    runId,
+    kind: "team_run",
+    depth,
+    requestedParallelism: limit,
+  });
+  if (!preflight.ok) {
+    throw new OrchestrationGuardError(preflight);
+  }
+  const runGrant = preflight.grant;
+
   const cards: AgentRunResult[] = members.map((name) => ({
     agent: name,
     source: "unknown",
@@ -463,28 +623,36 @@ async function runTeam(
 
   options.onDashboardUpdate(dashboard);
 
-  const limit = Math.max(1, Math.min(8, options.concurrency));
-  await mapWithConcurrencyLimit(members, limit, async (member, index) => {
-    const result = await runAgentTask(pi, {
-      agents: discovery.agents,
-      agentName: member,
-      task: `Team: ${teamName}\nGoal: ${goal}`,
-      cwd: ctx.cwd,
-      governor: options.governor,
-      signal: options.signal,
+  try {
+    await mapWithConcurrencyLimit(members, limit, async (member, index) => {
+      const result = await runAgentTask(pi, {
+        agents: discovery.agents,
+        agentName: member,
+        task: `Team: ${teamName}\nGoal: ${goal}`,
+        cwd: ctx.cwd,
+        governor: options.governor,
+        admission: options.admission,
+        runGrant,
+        signal: options.signal,
+      });
+
+      cards[index] = result;
+      options.onDashboardUpdate(dashboard);
+      return result;
     });
 
-    cards[index] = result;
-    options.onDashboardUpdate(dashboard);
-    return result;
-  });
-
-  return {
-    mode: "team",
-    team: teamName,
-    goal,
-    results: cards,
-  };
+    return {
+      mode: "team",
+      team: teamName,
+      goal,
+      results: cards,
+    };
+  } finally {
+    await options.admission.endRun(
+      runGrant,
+      cards.some((entry) => entry.status === "failed") ? "failed" : "ok",
+    );
+  }
 }
 
 async function runPipeline(
@@ -495,6 +663,7 @@ async function runPipeline(
   options: {
     agentScope: AgentScope;
     governor?: GovernorOverrides;
+    admission: OrchestrationAdmissionController;
     signal?: AbortSignal;
     onDashboardUpdate: (state: DashboardState) => void;
   },
@@ -519,6 +688,19 @@ async function runPipeline(
     return null;
   }
 
+  const runId = createRunId("pipeline_run", pipelineName);
+  const depth = currentOrchestrationDepth();
+  const preflight = await options.admission.preflightRun({
+    runId,
+    kind: "pipeline_run",
+    depth,
+    requestedParallelism: 1,
+  });
+  if (!preflight.ok) {
+    throw new OrchestrationGuardError(preflight);
+  }
+  const runGrant = preflight.grant;
+
   const cards: AgentRunResult[] = pipeline.steps.map((step, index) => ({
     agent: step.agent,
     source: "unknown",
@@ -541,69 +723,77 @@ async function runPipeline(
 
   let input = goal;
   const original = goal;
+  try {
+    for (let index = 0; index < pipeline.steps.length; index++) {
+      const step = pipeline.steps[index];
+      dashboard.graph = renderPipelineGraph(pipeline, index);
 
-  for (let index = 0; index < pipeline.steps.length; index++) {
-    const step = pipeline.steps[index];
-    dashboard.graph = renderPipelineGraph(pipeline, index);
+      const task = step.prompt
+        .replace(/\$INPUT/g, input)
+        .replace(/\$ORIGINAL/g, original);
 
-    const task = step.prompt
-      .replace(/\$INPUT/g, input)
-      .replace(/\$ORIGINAL/g, original);
+      cards[index].status = "running";
+      cards[index].output = `running step ${index + 1}`;
+      options.onDashboardUpdate(dashboard);
 
-    cards[index].status = "running";
-    cards[index].output = `running step ${index + 1}`;
-    options.onDashboardUpdate(dashboard);
+      const result = await runAgentTask(pi, {
+        agents: discovery.agents,
+        agentName: step.agent,
+        task,
+        cwd: step.cwd ? resolveRuntimePath(step.cwd, ctx.cwd) : ctx.cwd,
+        governor: options.governor,
+        admission: options.admission,
+        runGrant,
+        signal: options.signal,
+      });
 
-    const result = await runAgentTask(pi, {
-      agents: discovery.agents,
-      agentName: step.agent,
-      task,
-      cwd: step.cwd ? resolveRuntimePath(step.cwd, ctx.cwd) : ctx.cwd,
-      governor: options.governor,
-      signal: options.signal,
-    });
+      cards[index] = {
+        ...result,
+        stepIndex: index + 1,
+      };
 
-    cards[index] = {
-      ...result,
-      stepIndex: index + 1,
-    };
-
-    if (result.status === "failed") {
-      for (let rest = index + 1; rest < cards.length; rest++) {
-        cards[rest] = {
-          ...cards[rest],
-          status: "failed",
-          output: "skipped after failure",
-          error: "skipped",
+      if (result.status === "failed") {
+        for (let rest = index + 1; rest < cards.length; rest++) {
+          cards[rest] = {
+            ...cards[rest],
+            status: "failed",
+            output: "skipped after failure",
+            error: "skipped",
+          };
+        }
+        options.onDashboardUpdate(dashboard);
+        return {
+          mode: "pipeline",
+          pipeline: pipelineName,
+          goal,
+          checkpoints: pipeline.checkpoints ?? [],
+          results: cards,
         };
       }
+
+      input = result.output || input;
+
+      if (index + 1 < cards.length) {
+        cards[index + 1].status = "running";
+        cards[index + 1].output = "queued";
+      }
+
       options.onDashboardUpdate(dashboard);
-      return {
-        mode: "pipeline",
-        pipeline: pipelineName,
-        goal,
-        checkpoints: pipeline.checkpoints ?? [],
-        results: cards,
-      };
     }
 
-    input = result.output || input;
-
-    if (index + 1 < cards.length) {
-      cards[index + 1].status = "running";
-      cards[index + 1].output = "queued";
-    }
-
-    options.onDashboardUpdate(dashboard);
+    return {
+      mode: "pipeline",
+      pipeline: pipelineName,
+      goal,
+      checkpoints: pipeline.checkpoints ?? [],
+      results: cards,
+    };
+  } finally {
+    await options.admission.endRun(
+      runGrant,
+      cards.some((entry) => entry.status === "failed") ? "failed" : "ok",
+    );
   }
-
-  return {
-    mode: "pipeline",
-    pipeline: pipelineName,
-    goal,
-    checkpoints: pipeline.checkpoints ?? [],
-    results: cards,
-  };
 }
 
 function renderDashboard(ctx: ExtensionContext, widgetKey: string, dashboard: DashboardState): void {
@@ -824,12 +1014,55 @@ function formatPipelines(pipelines: PipelineMap): string[] {
   });
 }
 
+function createRunId(kind: "team_run" | "pipeline_run" | "subagent", target: string): string {
+  const safe = target.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 40);
+  return `${kind}:${safe}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function formatGuardBlockReason(rejection: AdmissionRejection): string {
+  const retry = rejection.retryAfterMs && rejection.retryAfterMs > 0
+    ? ` Retry after ${Math.ceil(rejection.retryAfterMs / 1000)}s.`
+    : "";
+  return `${ADMISSION_ERROR_PREFIX} ${rejection.code}: ${rejection.reason}.${retry}`.trim();
+}
+
+function formatGuardUiMessage(error: OrchestrationGuardError): string {
+  const retry = error.retryAfterMs && error.retryAfterMs > 0
+    ? ` retryAfter=${Math.ceil(error.retryAfterMs / 1000)}s`
+    : "";
+  return `${ADMISSION_ERROR_PREFIX} ${error.code}: ${error.message.replace(`${ADMISSION_ERROR_PREFIX} ${error.code}: `, "")}${retry}`;
+}
+
+function formatGuardToolMessage(error: OrchestrationGuardError): string {
+  const retry = error.retryAfterMs && error.retryAfterMs > 0
+    ? ` retryAfterMs=${error.retryAfterMs}`
+    : "";
+  return `${ADMISSION_ERROR_PREFIX} code=${error.code} reason=${error.message.replace(`${ADMISSION_ERROR_PREFIX} ${error.code}: `, "")}${retry}`;
+}
+
+function admissionFailureResult(config: AgentConfig, rejection: AdmissionRejection): AgentRunResult {
+  const retry = rejection.retryAfterMs && rejection.retryAfterMs > 0
+    ? ` retryAfterMs=${rejection.retryAfterMs}`
+    : "";
+  const reason = `${ADMISSION_ERROR_PREFIX} code=${rejection.code} reason=${rejection.reason}${retry}`;
+  return {
+    agent: config.name,
+    source: config.source,
+    status: "failed",
+    output: `error: ${reason}`,
+    error: reason,
+    usage: emptyUsage(),
+  };
+}
+
 interface RunAgentTaskOptions {
   agents: AgentConfig[];
   agentName: string;
   task: string;
   cwd: string;
   governor?: GovernorOverrides;
+  admission?: OrchestrationAdmissionController;
+  runGrant?: AdmissionRunGrant;
   signal?: AbortSignal;
 }
 
@@ -850,6 +1083,8 @@ async function runAgentTask(_pi: ExtensionAPI, options: RunAgentTaskOptions): Pr
     task: options.task,
     cwd: options.cwd,
     governor: options.governor,
+    admission: options.admission,
+    runGrant: options.runGrant,
     signal: options.signal,
     maxAttempts: LOCK_RETRY_MAX_ATTEMPTS,
   });
@@ -861,6 +1096,8 @@ async function runAgentTaskWithConfig(
     task: string;
     cwd: string;
     governor?: GovernorOverrides;
+    admission?: OrchestrationAdmissionController;
+    runGrant?: AdmissionRunGrant;
     signal?: AbortSignal;
     maxAttempts?: number;
   },
@@ -873,6 +1110,8 @@ async function runAgentTaskWithConfig(
       task: options.task,
       cwd: options.cwd,
       governor: options.governor,
+      admission: options.admission,
+      runGrant: options.runGrant,
       signal: options.signal,
     });
 
@@ -913,6 +1152,8 @@ async function runAgentTaskAttempt(
     task: string;
     cwd: string;
     governor?: GovernorOverrides;
+    admission?: OrchestrationAdmissionController;
+    runGrant?: AdmissionRunGrant;
     signal?: AbortSignal;
   },
 ): Promise<{ result: AgentRunResult; stderr: string }> {
@@ -943,124 +1184,157 @@ async function runAgentTaskAttempt(
     };
 
     const governor = new AdaptiveGovernor(resolveGovernorPolicy(options.governor));
+    const runId = options.runGrant?.runId ?? `adhoc_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const parentDepth = options.runGrant?.depth ?? currentOrchestrationDepth();
+    const childDepth = parentDepth + 1;
+
+    let slotGrant: AdmissionSlotGrant | null = null;
+    if (options.admission) {
+      const slotDecision = await options.admission.acquireSlot({
+        runId,
+        depth: childDepth,
+        agent: config.name,
+      });
+      if (!slotDecision.ok) {
+        return {
+          result: admissionFailureResult(config, slotDecision),
+          stderr: "",
+        };
+      }
+      slotGrant = slotDecision.grant;
+    }
 
     let aborted = false;
     let abortedByGovernor = false;
     let governorAbortMessage: string | undefined;
+    try {
+      const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
+        const child = spawn("pi", args, {
+          cwd: options.cwd,
+          stdio: ["ignore", "pipe", "pipe"],
+          shell: false,
+          env: {
+            ...process.env,
+            PI_ORCH_DEPTH: String(childDepth),
+            PI_ORCH_RUN_ID: runId,
+            PI_ORCH_PARENT_AGENT: config.name,
+          },
+        });
 
-    const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
-      const child = spawn("pi", args, {
-        cwd: options.cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
-      });
+        let stdoutBuffer = "";
+        let stderrBuffer = "";
+        let governorTimer: ReturnType<typeof setInterval> | null = null;
 
-      let stdoutBuffer = "";
-      let stderrBuffer = "";
-      let governorTimer: ReturnType<typeof setInterval> | null = null;
-
-      const stopGovernorTimer = () => {
-        if (governorTimer) {
-          clearInterval(governorTimer);
-          governorTimer = null;
-        }
-      };
-
-      const abortChild = (origin: "signal" | "governor", message?: string) => {
-        if (aborted) {
-          return;
-        }
-        aborted = true;
-        stopGovernorTimer();
-        if (origin === "governor") {
-          abortedByGovernor = true;
-          governorAbortMessage = message ?? "governor policy triggered";
-        }
-
-        child.kill("SIGTERM");
-        setTimeout(() => {
-          if (!child.killed) {
-            child.kill("SIGKILL");
+        const stopGovernorTimer = () => {
+          if (governorTimer) {
+            clearInterval(governorTimer);
+            governorTimer = null;
           }
-        }, 4000);
-      };
-
-      const evaluateGovernor = () => {
-        const decision = governor.evaluate(Date.now(), result.usage);
-        if (decision.action === "abort") {
-          abortChild("governor", decision.message);
-        }
-      };
-
-      child.stdout.on("data", (chunk) => {
-        stdoutBuffer += chunk.toString();
-        const lines = stdoutBuffer.split("\n");
-        stdoutBuffer = lines.pop() ?? "";
-        for (const line of lines) {
-          applyJsonEvent(line, result, governor);
-        }
-      });
-
-      child.stderr.on("data", (chunk) => {
-        stderrBuffer += chunk.toString();
-      });
-
-      child.on("close", (code) => {
-        stopGovernorTimer();
-
-        if (stdoutBuffer.trim()) {
-          applyJsonEvent(stdoutBuffer, result, governor);
-        }
-
-        if (stderrBuffer.trim() && result.status !== "failed") {
-          result.error = firstNonEmptyLine(stderrBuffer) ?? stderrBuffer.trim();
-        }
-
-        resolve({ exitCode: code ?? 0, stderr: stderrBuffer });
-      });
-
-      child.on("error", (error) => {
-        stopGovernorTimer();
-        result.status = "failed";
-        result.error = error.message;
-        resolve({ exitCode: 1, stderr: error.message });
-      });
-
-      governorTimer = setInterval(evaluateGovernor, governor.policy.checkIntervalMs);
-
-      if (options.signal) {
-        const abortFromSignal = () => {
-          abortChild("signal", "aborted");
         };
 
-        if (options.signal.aborted) {
-          abortFromSignal();
-        } else {
-          options.signal.addEventListener("abort", abortFromSignal, { once: true });
+        const abortChild = (origin: "signal" | "governor", message?: string) => {
+          if (aborted) {
+            return;
+          }
+          aborted = true;
+          stopGovernorTimer();
+          if (origin === "governor") {
+            abortedByGovernor = true;
+            governorAbortMessage = message ?? "governor policy triggered";
+          }
+
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (!child.killed) {
+              child.kill("SIGKILL");
+            }
+          }, 4000);
+        };
+
+        const evaluateGovernor = () => {
+          const decision = governor.evaluate(Date.now(), result.usage);
+          if (decision.action === "abort") {
+            abortChild("governor", decision.message);
+          }
+        };
+
+        child.stdout.on("data", (chunk) => {
+          stdoutBuffer += chunk.toString();
+          const lines = stdoutBuffer.split("\n");
+          stdoutBuffer = lines.pop() ?? "";
+          for (const line of lines) {
+            applyJsonEvent(line, result, governor);
+          }
+        });
+
+        child.stderr.on("data", (chunk) => {
+          stderrBuffer += chunk.toString();
+        });
+
+        child.on("close", (code) => {
+          stopGovernorTimer();
+
+          if (stdoutBuffer.trim()) {
+            applyJsonEvent(stdoutBuffer, result, governor);
+          }
+
+          if (stderrBuffer.trim() && result.status !== "failed") {
+            result.error = firstNonEmptyLine(stderrBuffer) ?? stderrBuffer.trim();
+          }
+
+          resolve({ exitCode: code ?? 0, stderr: stderrBuffer });
+        });
+
+        child.on("error", (error) => {
+          stopGovernorTimer();
+          result.status = "failed";
+          result.error = error.message;
+          resolve({ exitCode: 1, stderr: error.message });
+        });
+
+        governorTimer = setInterval(evaluateGovernor, governor.policy.checkIntervalMs);
+
+        if (options.signal) {
+          const abortFromSignal = () => {
+            abortChild("signal", "aborted");
+          };
+
+          if (options.signal.aborted) {
+            abortFromSignal();
+          } else {
+            options.signal.addEventListener("abort", abortFromSignal, { once: true });
+          }
         }
+      });
+
+      result.governor = governor.summarize(Date.now(), result.usage, abortedByGovernor);
+
+      if (abortedByGovernor) {
+        result.status = "failed";
+        result.error = governorAbortMessage ?? "governor policy triggered";
+      } else if (aborted) {
+        result.status = "failed";
+        result.error = "aborted";
       }
-    });
 
-    result.governor = governor.summarize(Date.now(), result.usage, abortedByGovernor);
+      if (exitCode !== 0 && !abortedByGovernor) {
+        result.status = "failed";
+        result.error = result.error || `exit code ${exitCode}`;
+      }
 
-    if (abortedByGovernor) {
-      result.status = "failed";
-      result.error = governorAbortMessage ?? "governor policy triggered";
-    } else if (aborted) {
-      result.status = "failed";
-      result.error = "aborted";
+      if (!result.output.trim()) {
+        result.output = result.error ? `error: ${result.error}` : "(no output)";
+      }
+
+      return { result, stderr };
+    } finally {
+      if (slotGrant && options.admission) {
+        await options.admission.releaseSlot(
+          slotGrant,
+          result.status === "failed" ? "failed" : "ok",
+        );
+      }
     }
-
-    if (exitCode !== 0 && !abortedByGovernor) {
-      result.status = "failed";
-      result.error = result.error || `exit code ${exitCode}`;
-    }
-
-    if (!result.output.trim()) {
-      result.output = result.error ? `error: ${result.error}` : "(no output)";
-    }
-
-    return { result, stderr };
   } finally {
     if (promptDir) {
       rmSync(promptDir, { recursive: true, force: true });

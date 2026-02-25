@@ -100,3 +100,42 @@ Command overrides (`/team`, `/pipeline`):
 - `--gov-max-cost <usd>`
 - `--gov-max-tokens <n>`
 - `--gov-fuse-seconds <seconds>`
+
+## Admission control + circuit breaker (v1)
+
+Orchestration now has a fail-closed admission layer in front of execution.
+
+What it gates:
+- `team_run`
+- `pipeline_run`
+- `subagent` (when circuit/depth policy blocks further fan-out)
+- per-agent spawn slots inside orchestration runner
+
+Core controls:
+- host-global run cap (`PI_ORCH_ADM_MAX_RUNS`)
+- host-global slot/process cap (`PI_ORCH_ADM_MAX_SLOTS`)
+- recursion depth cap via `PI_ORCH_DEPTH` + `PI_ORCH_ADM_MAX_DEPTH`
+- circuit opens on:
+  - critical host pressure from `ops-watchdog`
+  - excessive tool call/result mismatch gap (auto-resets after quiet period)
+
+Operational commands:
+- `/orchestration-policy`
+- `/orchestration-circuit`
+
+State/log paths (default):
+- `~/.pi/agent/state/orchestration-admission-state.json`
+- `~/.pi/agent/logs/orchestration-admission.ndjson`
+Admission env knobs:
+- `PI_ORCH_ADM_MAX_RUNS`
+- `PI_ORCH_ADM_MAX_SLOTS`
+- `PI_ORCH_ADM_MAX_DEPTH`
+- `PI_ORCH_ADM_BREAKER_COOLDOWN_MS`
+- `PI_ORCH_ADM_GAP_MAX`
+- `PI_ORCH_ADM_GAP_RESET_QUIET_MS`
+- `PI_ORCH_ADM_RUN_TTL_MS`
+- `PI_ORCH_ADM_SLOT_TTL_MS`
+- `PI_ORCH_ADM_EVENT_LOG_MAX_BYTES`
+- `PI_ORCH_ADM_EVENT_LOG_MAX_BACKUPS`
+- `PI_ORCH_ADM_EVENT_LOG_ROTATE_CHECK_MS`
+

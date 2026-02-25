@@ -4,6 +4,7 @@
   "extensions": [
     "extensions/guardrails/index.ts",
     "extensions/profiles/index.ts",
+    "extensions/handoff/index.ts",
     "extensions/web-search/index.ts",
     "extensions/subagent/index.ts",
     "extensions/visibility/index.ts"
