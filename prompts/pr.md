@@ -17,11 +17,6 @@ Use current branch diff to produce and **publish** a PR update:
   - If a PR already exists: `gh pr edit ... --body-file <path>`
 - Only skip GitHub write if the user explicitly says "draft only" / "no write".
 
-## Repository scope (non-negotiable)
-
-- Assume PR work applies to the current working directory repository.
-- If you need to read/write/edit or run bash in another repository, ask for explicit confirmation first.
-
 ## Quality bar
 
 - Title must be human-readable and specific.

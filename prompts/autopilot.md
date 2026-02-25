@@ -18,27 +18,23 @@ Codex-first pattern: draft fast (investigation, implementation, tests, docs), th
 
 ## Objective
 
-Deliver the selected issue (explicit `issue-id` when provided, otherwise highest-priority open issue) as a draft PR with clean verification evidence and `Closes #N`.
-
-## Repository scope default (Non-Negotiable)
-
-- Assume work is for the current working directory repository.
-- If any read/write/edit/bash action needs another repository path, ask for explicit user confirmation first.
+Deliver the selected work item (explicit `issue-id` when provided, otherwise highest-priority open issue or `BACKLOG.md` top-priority item) as a draft PR with clean verification evidence.
 
 ## Priority Selection (Non-Negotiable)
 
-Always work the highest-priority issue first.
+Always work the highest-priority work item first.
 
 1. `p0` / `priority/p0` > `p1` / `priority/p1` > `p2` / `priority/p2` > `p3` / `priority/p3` > unlabeled
 2. Within tier: `horizon/now` > `horizon/next` > unlabeled
 3. Within same horizon: lower issue number first
 4. Do **not** skip for size, ambiguity, or comfort
 
-If no open issues are found, run `/groom` to generate actionable work.
+If no open issues are found and `BACKLOG.md` exists, select the highest-priority unchecked item there.
+If no open issues and no actionable backlog item are found, run `/groom` to generate actionable work.
 
 ## Readiness Rule
 
-Never skip an issue because it is under-specified. Make it ready:
+Never skip a selected work item because it is under-specified. Make it ready:
 1. Clarify scope from issue title/body/comments
 2. Explore codebase for constraints
 3. Create/refine spec
@@ -79,15 +75,18 @@ After opening the PR:
 1. **After intake/spec/design** (before implementation)
 2. **Before PR publish/update finalization**
 3. **Before merge** (explicit authorization required)
+4. **Before next autonomous issue run**: review reflection/codification output
 
 If running non-interactive, stop at draft PR + readiness report. Do not merge.
 
 ## Workflow
 
-1. **Find issue**
+1. **Find work item**
    - If `issue-id` provided: `gh issue view <issue-id> --json number,title,body,labels,comments`
    - Else: `gh issue list --state open --limit 200`
-   - Select by priority rules above
+   - If open issues exist: select by priority rules above
+   - Else if `BACKLOG.md` exists: select highest-priority unchecked item
+   - Else: run `/groom` to create actionable work
 2. **Load context**
    - Read issue + comments
    - Read `project.md` when present
@@ -99,6 +98,7 @@ If running non-interactive, stop at draft PR + readiness report. Do not merge.
    - Present packet and ask for GO/NO-GO before coding
 5. **Build**
    - Run `/execute` in small, verified steps
+   - Any subagent delegation must include explicit success criteria and budgets (`maxTurns`, `maxRuntimeSeconds`)
 6. **CI/fix loop (bounded)**
    - Run tests/lint/build and iterate with `/fix-ci` when needed
    - Stop after max loop budget and escalate if unresolved
@@ -106,8 +106,8 @@ If running non-interactive, stop at draft PR + readiness report. Do not merge.
    - Run `/pr` to draft title/body/evidence
    - Apply `github-cli-hygiene` skill for all GitHub write commands
    - Open/update PR with `--body-file`
-   - Run `/pr-lint` and ensure `Closes #N` is present
-   - Post PR link/status back to issue
+   - If issue-backed, run `/pr-lint` and ensure `Closes #N` is present
+   - If issue-backed, post PR link/status back to issue
 8. **Checkpoint 2: approval before final PR publish state**
    - Confirm the PR summary and verification evidence are acceptable
 9. **Review loop (bounded)**
@@ -121,6 +121,13 @@ If running non-interactive, stop at draft PR + readiness report. Do not merge.
    - Merge only through `/squash-merge` after explicit human authorization
 12. **Retro note**
    - Record scope changes, blockers, and one reusable insight
+13. **Reflection + codification gate (required for flywheel mode)**
+   - Run a high-intelligence reflection pass on issue, diff, CI/review outcomes, and project north star.
+   - Decide what to codify in:
+     - project backlog
+     - repo-local `.pi/*`
+     - global `pi-agent-config`
+   - Apply low-risk updates immediately; queue risky updates for explicit review.
 
 ## Stopping Conditions
 
@@ -138,7 +145,7 @@ These are **not** stopping conditions:
 ## Output
 
 Report:
-- Issue selected and why
+- Work item selected and why
 - Spec/design status
 - Key files changed
 - Verification results
@@ -146,3 +153,4 @@ Report:
 - Review findings triaged (fixed vs deferred)
 - Checkpoint decisions (GO/NO-GO outcomes)
 - Follow-ups / retro insight
+- Reflection/codification updates proposed or applied
