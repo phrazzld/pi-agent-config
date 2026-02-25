@@ -7,6 +7,13 @@ Repository-specific guidance when working **inside** `pi-agent-config`.
 This repo is the source-of-truth for global Pi runtime config (`~/.pi/agent`).
 Changes here affect behavior across many repositories.
 
+
+## Operating philosophy
+
+- Prefer **convention over configuration**: choose one clear default path unless a real need proves otherwise.
+- Favor **small, focused, composable primitives** (Unix philosophy) over monolithic workflow blobs.
+- Remove stale flags/options once a better default is known.
+
 ## Local vs Global policy
 
 - Keep **global** config focused on cross-repo, high-frequency capabilities.

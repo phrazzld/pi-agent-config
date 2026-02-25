@@ -48,7 +48,7 @@ Build a world-class, explicit Pi configuration system with:
 
 - [ ] Add weekly telemetry rollup command for `~/.pi/agent/logs/primitive-usage.ndjson`.
 - [ ] Tune adaptive governor scoring/thresholds on real runs and tighten false-positive controls.
-- [ ] Extend bootstrap `--max` mode with a final consensus/scoring round.
+- [ ] Tighten bootstrap ambition checkpoint scoring and add consensus-quality validation on generated artifacts.
 - [ ] Run bootstrap across active repos and capture deltas in per-repo notes.
 
 ### Next

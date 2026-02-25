@@ -31,6 +31,19 @@ autopilot:
   - red-team
   - documenter
 
+
+groom-council:
+  - groom-strategist
+  - groom-researcher
+  - groom-critic
+  - groom-synthesizer
+
+groom-ambition-council:
+  - groom-strategist
+  - groom-researcher
+  - groom-critic
+  - groom-synthesizer
+
 meta-council:
   - meta-agent-expert
   - meta-config-expert

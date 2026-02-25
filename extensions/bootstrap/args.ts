@@ -8,8 +8,8 @@ export interface BootstrapArgs {
 export function parseBootstrapArgs(raw: string, defaultDomain: string): BootstrapArgs {
   const tokens = raw.trim().split(/\s+/).filter(Boolean);
   let force = false;
-  let quick = false;
-  let max = false;
+  let quick = false; // deprecated compatibility flag (ignored by bootstrap runtime)
+  let max = false; // deprecated compatibility flag (ignored by bootstrap runtime)
   let domain = "";
 
   for (let index = 0; index < tokens.length; index++) {

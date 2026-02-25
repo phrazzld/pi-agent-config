@@ -13,6 +13,11 @@ Profiles now preserve explicit **always-on base capabilities** when available:
 
 This keeps orchestration/memory primitives available across slices (`meta/build/ship/fast`) while still allowing profile-specific tool emphasis.
 
+
+Operating philosophy baked into profile instructions:
+- convention over configuration
+- Unix-style composition (small focused primitives combined into workflows)
+
 Canonical profile names:
 - `ultrathink`
 - `execute`

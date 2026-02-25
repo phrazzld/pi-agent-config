@@ -94,34 +94,38 @@ If running non-interactive, stop at draft PR + readiness report. Do not merge.
 3. **Spec + design packet**
    - If missing or weak, run `/spec` then `/architect`
    - Produce a short execution packet: acceptance criteria, scope bounds, risks, test plan
-4. **Checkpoint 1: approval to implement**
-   - Present packet and ask for GO/NO-GO before coding
-5. **Build**
+4. **Ambition checkpoint (required)**
+   - Ask: "What is the single smartest and most radically innovative, accretive, useful, compelling addition we should make right now?"
+   - Propose 3 candidates, select 1 (or explicitly decline all), and justify.
+   - Include a 72h validation experiment + kill criteria + rollback path.
+5. **Checkpoint 1: approval to implement**
+   - Present packet + ambition decision and ask for GO/NO-GO before coding
+6. **Build**
    - Run `/execute` in small, verified steps
-   - Any subagent delegation must include explicit success criteria and budgets (`maxTurns`, `maxRuntimeSeconds`)
-6. **CI/fix loop (bounded)**
+   - Any delegation must include explicit success criteria + stop criteria; avoid introducing extra knobs unless strictly necessary.
+7. **CI/fix loop (bounded)**
    - Run tests/lint/build and iterate with `/fix-ci` when needed
    - Stop after max loop budget and escalate if unresolved
-7. **PR prep**
+8. **PR prep**
    - Run `/pr` to draft title/body/evidence
    - Apply `github-cli-hygiene` skill for all GitHub write commands
    - Open/update PR with `--body-file`
    - If issue-backed, run `/pr-lint` and ensure `Closes #N` is present
    - If issue-backed, post PR link/status back to issue
-8. **Checkpoint 2: approval before final PR publish state**
+9. **Checkpoint 2: approval before final PR publish state**
    - Confirm the PR summary and verification evidence are acceptable
-9. **Review loop (bounded)**
+10. **Review loop (bounded)**
    - Triage review comments (critical/high first)
    - Push fixes or post scoped responses + follow-up issue links
    - Stop after max loop budget and escalate if unresolved
-10. **Polish pass (conditional quality ratchet)**
+11. **Polish pass (conditional quality ratchet)**
    - Once CI is green and comments are resolved, run `/polish` when high-value and low-risk
    - Re-run required checks after polish changes
-11. **Checkpoint 3: merge authorization**
+12. **Checkpoint 3: merge authorization**
    - Merge only through `/squash-merge` after explicit human authorization
-12. **Retro note**
+13. **Retro note**
    - Record scope changes, blockers, and one reusable insight
-13. **Reflection + codification gate (required for flywheel mode)**
+14. **Reflection + codification gate (required for flywheel mode)**
    - Run a high-intelligence reflection pass on issue, diff, CI/review outcomes, and project north star.
    - Decide what to codify in:
      - project backlog

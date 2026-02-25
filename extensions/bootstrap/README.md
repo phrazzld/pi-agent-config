@@ -1,40 +1,28 @@
 # bootstrap extension
 
-Code-backed repository bootstrap primitive with autonomous multi-lane synthesis.
+Code-backed repository bootstrap primitive with an opinionated flow.
 
 ## Command
 
-- `/bootstrap-repo [domain] [--force] [--quick] [--max]`
+- `/bootstrap-repo [domain] [--force]`
 - `/bootstrap-repo --domain vox`
 
 ## Tool
 
 - `bootstrap_repo`
 
-## Plan vs Apply
+## Opinionated flow (always-on)
 
-- `/bootstrap-plan` (prompt template) = planning/recon only, no file writes.
-- `/bootstrap-repo` (extension command/tool) = writes repo-local `.pi/` artifacts.
+`/bootstrap-repo` always runs this sequence:
 
-## Default behavior (intelligent mode)
+1. repository reconnaissance across parallel specialist lanes
+2. ambition pass (`single highest-leverage addition` + 72h validation + kill criteria)
+3. synthesis into repo-local `.pi` artifacts
+4. immediate apply/write of the generated foundation
 
-By default, bootstrap dispatches parallel lanes to explore and stress-test a repo-local Pi foundation:
+No quick/plan toggles are required in normal operation.
 
-1. repo scout lane (engineering workflow reconnaissance)
-2. context bridge lane (AGENTS/CLAUDE/.claude/.codex/.pi adopt-bridge-ignore)
-3. docs research lane (retrieval-backed best practices)
-4. workflow critic lane (failure modes and safeguards)
-5. synthesis lane (generates repo-local Pi artifacts)
-
-This is intentionally goal-oriented: set success criteria, gather evidence, synthesize, and avoid brittle micro-procedures.
-
-## Max mode
-
-Use `--max` to add extra ideation and implementation-critique lanes before synthesis.
-
-## Quick mode
-
-Use `--quick` to skip autonomous lanes and generate template-based bootstrap artifacts.
+> Compatibility note: legacy `--quick` / `--max` flags are ignored.
 
 ## Model routing
 
@@ -68,7 +56,7 @@ Generated workflow docs/prompts include local-first memory guidance (`/memory-in
 
 By default, existing files are preserved. Use `--force` to overwrite differing files.
 
-Bootstrap-generated `.pi/settings.json` now preserves a base extension capability set by default:
+Bootstrap-generated `.pi/settings.json` preserves a base extension capability set by default:
 - `organic-workflows`
 - `profiles`
 - `subagent`

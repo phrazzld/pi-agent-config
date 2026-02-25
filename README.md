@@ -26,7 +26,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `extensions/orchestration`: `/team` + `/pipeline` execution over declarative `agents/teams.yaml` and `agents/pipelines.yaml` with live dashboard UI + adaptive governor guardrails
 - `extensions/visibility`: runtime visibility instrumentation (single-row footer + optional widget + NDJSON logs)
 - `extensions/daybook`: charisma-first one-on-one journaling posture with tone controls
-- `extensions/bootstrap`: intelligent `/bootstrap-repo` primitive (autonomous multi-lane exploration + synthesis) for repo-local `.pi/` foundations
+- `extensions/bootstrap`: opinionated `/bootstrap-repo` primitive (always plan + ambition pass + apply) for repo-local `.pi/` foundations
 
 ## Included Skills
 - `skills/web-search`: retrieval-first web research workflow and output contract
@@ -52,7 +52,6 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `/autopilot`
 - `/reflect`
 - `/daybook`
-- `/bootstrap-plan`
 
 ## Included Workflow Commands (extension-backed)
 - `/squash-merge`
@@ -71,7 +70,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 ## Included Delegation Tooling
 - `subagent` tool (from `extensions/subagent`)
 - orchestration commands/tools: `/team`, `/pipeline`, `team_run`, `pipeline_run`
-- default agent profiles in `agents/` (`scout`, `planner`, `plan-reviewer`, `worker`, `reviewer`, `red-team`, `documenter`, plus meta-domain experts)
+- default agent profiles in `agents/` (`scout`, `planner`, `plan-reviewer`, `worker`, `reviewer`, `red-team`, `documenter`, groom specialists, plus meta-domain experts)
 - team and pipeline data in `agents/teams.yaml` + `agents/pipelines.yaml`
 
 ## Setup
@@ -146,6 +145,7 @@ See:
 - `docs/capability-slicing.md`
 - `docs/repo-bootstrap-workflow.md`
 - `docs/orchestration-playbook.md`
+- `docs/groom-migration-plan.md`
 - `docs/adaptive-orchestration-governor-v1.md`
 - `docs/primitives-cookbook.md`
 - `docs/daybook-model-evaluation.md`

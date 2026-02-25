@@ -16,11 +16,11 @@ describe("bootstrap args", () => {
     expect(parseBootstrapArgs("--domain=cerberus-cloud", "default").domain).toBe("cerberus-cloud");
   });
 
-  test("parses quick flag", () => {
+  test("parses deprecated quick flag", () => {
     expect(parseBootstrapArgs("--quick", "default").quick).toBe(true);
   });
 
-  test("parses max flag", () => {
+  test("parses deprecated max flag", () => {
     expect(parseBootstrapArgs("--max", "default").max).toBe(true);
   });
 

@@ -36,8 +36,7 @@ interface BootstrapResult {
   repoRoot: string;
   domain: string;
   force: boolean;
-  quick: boolean;
-  max: boolean;
+  mode: string;
   lanes: LaneResult[];
   synthesisModel: string;
   recommendedTarget: string;
@@ -95,8 +94,8 @@ interface BootstrapProgressTracker {
 const BOOTSTRAP_PARAMS = Type.Object({
   domain: Type.Optional(Type.String({ description: "Domain slug (e.g. vox, cerberus)" })),
   force: Type.Optional(Type.Boolean({ description: "Overwrite existing differing files" })),
-  quick: Type.Optional(Type.Boolean({ description: "Skip autonomous multi-model bootstrap and use template-only mode" })),
-  max: Type.Optional(Type.Boolean({ description: "Run additional synthesis lanes for deeper exploration and stress-testing" })),
+  quick: Type.Optional(Type.Boolean({ description: "Deprecated: ignored (bootstrap now always runs the full planning+ambition flow)." })),
+  max: Type.Optional(Type.Boolean({ description: "Deprecated: ignored (bootstrap now always runs max-depth lanes)." })),
 });
 
 const MODEL_SCOUT = process.env.PI_BOOTSTRAP_MODEL_SCOUT?.trim() || "openai-codex/gpt-5.3-codex";
@@ -130,17 +129,22 @@ const BOOTSTRAP_WIDGET_ID = "bootstrap-progress";
 export default function bootstrapExtension(pi: ExtensionAPI): void {
   pi.registerCommand("bootstrap-repo", {
     description:
-      "Intelligent repo bootstrap: multi-lane exploration + synthesis into repo-local .pi foundation",
+      "Opinionated repo bootstrap: always plan + ambition pass + apply for repo-local .pi foundation",
     handler: async (args, ctx) => {
       const defaultDomain = path.basename(await detectRepoRoot(pi, ctx.cwd));
       const parsed = parseBootstrapArgs(args, defaultDomain);
+
+      if (parsed.quick || parsed.max) {
+        ctx.ui.notify(
+          "bootstrap-repo ignores --quick/--max: the workflow is now opinionated (always full planning + ambition + apply).",
+          "info",
+        );
+      }
 
       try {
         const result = await bootstrapRepo(pi, ctx, {
           domain: parsed.domain,
           force: parsed.force,
-          quick: parsed.quick,
-          max: parsed.max,
         });
 
         const summary = formatBootstrapSummary(result);
@@ -163,7 +167,7 @@ export default function bootstrapExtension(pi: ExtensionAPI): void {
     name: "bootstrap_repo",
     label: "Bootstrap Repo",
     description:
-      "Bootstrap repo-local Pi foundation with autonomous exploration lanes and synthesis-driven config output.",
+      "Bootstrap repo-local Pi foundation using an opinionated plan+ambition+apply workflow.",
     parameters: BOOTSTRAP_PARAMS,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const defaultDomain = path.basename(await detectRepoRoot(pi, ctx.cwd));
@@ -172,8 +176,6 @@ export default function bootstrapExtension(pi: ExtensionAPI): void {
         const result = await bootstrapRepo(pi, ctx, {
           domain: params.domain?.trim() || defaultDomain,
           force: params.force ?? false,
-          quick: params.quick ?? false,
-          max: params.max ?? false,
         });
 
         const summary = formatBootstrapSummary(result);
@@ -199,12 +201,12 @@ export default function bootstrapExtension(pi: ExtensionAPI): void {
 async function bootstrapRepo(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
-  options: { domain: string; force: boolean; quick: boolean; max: boolean },
+  options: { domain: string; force: boolean },
 ): Promise<BootstrapResult> {
   const startedAtMs = Date.now();
   const repoRoot = await detectRepoRoot(pi, ctx.cwd);
   const domain = sanitizeDomain(options.domain);
-  const mode = bootstrapModeLabel(options.quick, options.max);
+  const mode = bootstrapModeLabel();
 
   const progress = createBootstrapProgressTracker(ctx, {
     repoRoot,
@@ -224,19 +226,14 @@ async function bootstrapRepo(
     let recommendedTarget = "build";
     let plan: BootstrapPlan | null = null;
 
-    if (!options.quick) {
-      progress.setPhase("running autonomous lanes", options.max ? "max mode" : "default mode");
-      lanes = await runBootstrapLanes(pi, repoRoot, facts, ctx, options.max, progress);
+    progress.setPhase("running autonomous lanes", "opinionated max mode");
+    lanes = await runBootstrapLanes(pi, repoRoot, facts, ctx, progress);
 
-      progress.setPhase("synthesizing repository-local plan", `model=${MODEL_SYNTHESIS}`);
-      const synthesis = await runSynthesisLane(pi, repoRoot, facts, lanes);
-      plan = synthesis.plan;
-      if (!plan && synthesis.error) {
-        notes.push(`synthesis-fallback: ${synthesis.error}`);
-      }
-    } else {
-      progress.setPhase("quick mode", "template fallback (no autonomous lanes)");
-      ctx.ui.notify("bootstrap-repo quick mode enabled: skipping autonomous lane execution.", "info");
+    progress.setPhase("synthesizing repository-local plan", `model=${MODEL_SYNTHESIS}`);
+    const synthesis = await runSynthesisLane(pi, repoRoot, facts, lanes);
+    plan = synthesis.plan;
+    if (!plan && synthesis.error) {
+      notes.push(`synthesis-fallback: ${synthesis.error}`);
     }
 
     if (!plan) {
@@ -270,8 +267,7 @@ async function bootstrapRepo(
       repoRoot,
       domain,
       force: options.force,
-      quick: options.quick,
-      max: options.max,
+      mode,
       lanes,
       synthesisModel: MODEL_SYNTHESIS,
       recommendedTarget,
@@ -299,7 +295,6 @@ async function runBootstrapLanes(
   repoRoot: string,
   facts: RepoFacts,
   ctx: ExtensionContext,
-  maxMode: boolean,
   progress?: BootstrapProgressTracker,
 ): Promise<LaneResult[]> {
   const webSearchExtension = path.join(getConfigDir(), "extensions", "web-search", "index.ts");
@@ -342,24 +337,22 @@ async function runBootstrapLanes(
     },
   ];
 
-  if (maxMode) {
-    lanes.push(
-      {
-        name: "agentic-ideation",
-        model: MODEL_IDEATION,
-        thinking: "high",
-        useWebSearch: true,
-        task: buildAgenticIdeationPrompt(facts),
-      },
-      {
-        name: "implementation-critic",
-        model: MODEL_CRITIC,
-        thinking: "xhigh",
-        useWebSearch: false,
-        task: buildImplementationCriticPrompt(facts),
-      },
-    );
-  }
+  lanes.push(
+    {
+      name: "ambition-pass",
+      model: MODEL_IDEATION,
+      thinking: "high",
+      useWebSearch: true,
+      task: buildAgenticIdeationPrompt(facts),
+    },
+    {
+      name: "implementation-critic",
+      model: MODEL_CRITIC,
+      thinking: "xhigh",
+      useWebSearch: false,
+      task: buildImplementationCriticPrompt(facts),
+    },
+  );
 
   progress?.setLanes(lanes.map((lane) => ({ name: lane.name, model: lane.model })));
   ctx.ui.notify(`bootstrap-repo running ${lanes.length} lane(s) in parallel…`, "info");
@@ -428,6 +421,7 @@ async function runSynthesisLane(
     "- Focused: explicit local opt-ins and auditable config.",
     "- Agentic: provide prompts, agent overlays, and pipelines for explore -> design -> implement -> review loops.",
     "- Practical: avoid over-prescriptive scripts; use role + objective + success criteria contracts.",
+    "- Ambitious: include a single highest-leverage, radically accretive addition with a 72h validation experiment and kill criteria.",
     "- Safe: align with local quality gates, tooling, and project conventions.",
     "",
     "Return STRICT JSON only (no markdown fences) with this exact shape:",
@@ -456,6 +450,7 @@ async function runSynthesisLane(
     "- Teams and pipelines must only reference agents that exist in files output.",
     "- Include at least one repo-specific delivery pipeline.",
     "- Include concise rationale in .pi/bootstrap-report.md with lane evidence references.",
+    "- .pi/bootstrap-report.md MUST include a section: Single Highest-Leverage Addition with: idea, why now, 72h validation experiment, kill criteria.",
     "",
     "## Repository Facts",
     formatRepoFacts(facts),
@@ -634,6 +629,12 @@ function buildBootstrapReport(facts: RepoFacts, lanes: LaneResult[], notes: stri
     "",
     "## Repository Context Digest",
     truncateForSynthesis(facts.localContextSummary || "(none)", 6000),
+    "",
+    "## Single Highest-Leverage Addition",
+    "- Source lane: ambition-pass",
+    "- Why now:",
+    "- 72h validation experiment:",
+    "- Kill criteria:",
     "",
     "## Lane Evidence",
     laneSection,
@@ -890,20 +891,25 @@ function buildWorkflowCriticPrompt(facts: RepoFacts): string {
 
 function buildAgenticIdeationPrompt(facts: RepoFacts): string {
   return [
-    "Lane: agentic-ideation",
+    "Lane: ambition-pass",
     "Role: workflow designer optimizing for high-quality agentic engineering throughput.",
     "Objective: propose bold but practical local workflows that compound over repeated usage.",
     "Latitude: think creatively, but keep recommendations shippable in repo-local config.",
+    "",
+    "Mandatory question:",
+    "- What is the single smartest and most radically innovative, accretive, useful, compelling addition to this bootstrap foundation right now?",
     "",
     "Success criteria:",
     "- Produces high-leverage workflow prompts and pipeline patterns.",
     "- Distinguishes must-have foundation from optional enhancements.",
     "- Keeps setup minimal while amplifying agent autonomy.",
+    "- Defines one selected ambition addition with 72h validation + kill criteria.",
     "",
     "Output contract:",
     "## Foundation Workflow Pattern",
     "## Prompt + Pipeline Ideas",
     "## Minimal Viable Bootstrap vs Optional Upgrades",
+    "## Single Highest-Leverage Addition",
     "",
     "Repository facts:",
     formatRepoFacts(facts),
@@ -1511,14 +1517,8 @@ function localWorkflowTemplate(facts: RepoFacts): string {
   ].join("\n");
 }
 
-function bootstrapModeLabel(quick: boolean, max: boolean): string {
-  if (quick) {
-    return "quick";
-  }
-  if (max) {
-    return "intelligent-max";
-  }
-  return "intelligent";
+function bootstrapModeLabel(): string {
+  return "opinionated-max";
 }
 
 function createBootstrapProgressTracker(
@@ -1730,7 +1730,7 @@ function formatBootstrapSummary(result: BootstrapResult): string {
   const lines = [
     `bootstrap-repo (${result.domain})`,
     `repo: ${result.repoRoot}`,
-    `mode: ${bootstrapModeLabel(result.quick, result.max)}`,
+    `mode: ${result.mode}`
     `duration: ${formatElapsed(result.elapsedMs)}`,
     `recommended target: pictl ${result.recommendedTarget}`,
     `created=${created} updated=${updated} skipped=${skipped}`,

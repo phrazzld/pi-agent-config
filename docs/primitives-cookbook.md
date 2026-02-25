@@ -66,19 +66,16 @@ Run example:
 
 - Doc: `docs/repo-bootstrap-workflow.md`
 - Use sequence:
-  1. `/bootstrap-plan` (planning/recon only)
-  2. `/bootstrap-repo --domain <repo-domain>` (apply/scaffold)
-  3. `/memory-ingest --scope both --force` (prime local-first memory)
-  4. switch to repo execution profile (`pictl build`)
+  1. `/bootstrap-repo --domain <repo-domain>` (opinionated plan + ambition + apply)
+  2. `/memory-ingest --scope both --force` (prime local-first memory)
+  3. switch to repo execution profile (`pictl build`)
 
 ## Bootstrap primitive
 
 - Extension command: `/bootstrap-repo` (from `extensions/bootstrap`)
 - Tool: `bootstrap_repo`
-- Default mode is intelligent: multi-lane exploration + synthesis
-- Optional deep mode: `/bootstrap-repo --max`
-- Optional fast mode: `/bootstrap-repo --quick`
-- Planning prompt (non-writing): `prompts/bootstrap-plan.md`
+- Default mode is opinionated: always multi-lane exploration + ambition pass + synthesis
+- Legacy `--quick` / `--max` toggles are ignored for simplicity
 
 ## Memory primitives
 

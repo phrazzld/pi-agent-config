@@ -42,6 +42,7 @@ Behavior:
 
 Core delivery:
 - `scout`, `planner`, `plan-reviewer`, `worker`, `reviewer`, `red-team`, `documenter`
+- grooming specialists: `groom-strategist`, `groom-researcher`, `groom-critic`, `groom-synthesizer`
 
 Meta council (Pi domain experts):
 - `meta-agent-expert`
