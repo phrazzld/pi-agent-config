@@ -1,0 +1,45 @@
+# Discovery Hygiene
+
+Goal: keep global Pi startup lean while allowing focused, explicit opt-ins per repository.
+
+## Baseline policy
+
+- Retire broad home-level context files (`~/CLAUDE.md`).
+- Keep global skills/extensions minimal in `~/.pi/agent` (this repo is source of truth).
+- Disable global `~/.agents/skills/*` auto-discovery by default via `settings.json`.
+
+Current global setting in this repo (machine-specific home path):
+
+```json
+{
+  "skills": [
+    "!/Users/phaedrus/.agents/skills/**"
+  ]
+}
+```
+
+## Repo-local opt-in (recommended)
+
+When a specific repo needs one of those skills, opt in explicitly in that repo’s `.pi/settings.json`:
+
+```json
+{
+  "skills": [
+    "+/Users/phaedrus/.agents/skills/agent-browser",
+    "+/Users/phaedrus/.agents/skills/beautiful-mermaid"
+  ]
+}
+```
+
+Use exact `+` includes for narrow, auditable access.
+
+## Practical split of responsibility
+
+- **Global (`pi-agent-config`)**: reusable primitives, default slices, guardrails, shared teams/pipelines.
+- **Repo-local (`<repo>/.pi/`)**: domain-specific skills/agents/prompts and narrow model/workflow overrides.
+
+Examples:
+- Keep `speech-rewrite-prompting` in `vox/.pi/skills/` (domain specific).
+- Keep `llm-communication` and `skill-builder` global (cross-repo utility).
+
+This keeps the global system powerful but predictable, and each repo intentionally composed.
