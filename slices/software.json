@@ -1,6 +1,6 @@
 {
-  "description": "Full issue-to-PR slice with retrieval, delegation, orchestration visibility, and merge governance.",
-  "defaultProfile": "ship",
+  "description": "General software-engineering slice for product repos (plan/build/review + governance + orchestration).",
+  "defaultProfile": "execute",
   "extensions": [
     "extensions/guardrails/index.ts",
     "extensions/profiles/index.ts",

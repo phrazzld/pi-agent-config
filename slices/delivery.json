@@ -1,10 +1,12 @@
 {
-  "description": "Implementation + PR governance + delegated execution.",
+  "description": "Implementation + PR governance + delegated execution with team/pipeline orchestration.",
   "defaultProfile": "execute",
   "extensions": [
     "extensions/guardrails/index.ts",
     "extensions/profiles/index.ts",
     "extensions/subagent/index.ts",
+    "extensions/orchestration/index.ts",
+    "extensions/visibility/index.ts",
     "extensions/organic-workflows/index.ts"
   ]
 }

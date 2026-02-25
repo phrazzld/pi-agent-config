@@ -1,10 +1,11 @@
 {
-  "description": "Research-heavy slice with web retrieval and delegation.",
+  "description": "Research-heavy slice with web retrieval and visibility instrumentation.",
   "defaultProfile": "meta",
   "extensions": [
     "extensions/guardrails/index.ts",
     "extensions/profiles/index.ts",
     "extensions/web-search/index.ts",
-    "extensions/subagent/index.ts"
+    "extensions/subagent/index.ts",
+    "extensions/visibility/index.ts"
   ]
 }

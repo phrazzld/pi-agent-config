@@ -1,10 +1,13 @@
 {
-  "description": "Pi-config development slice for extension/prompt/skill architecture work.",
+  "description": "Pi-config development slice for extension/prompt/skill architecture work with maximum primitive visibility.",
   "defaultProfile": "meta",
   "extensions": [
     "extensions/guardrails/index.ts",
     "extensions/profiles/index.ts",
     "extensions/web-search/index.ts",
-    "extensions/subagent/index.ts"
+    "extensions/subagent/index.ts",
+    "extensions/bootstrap/index.ts",
+    "extensions/orchestration/index.ts",
+    "extensions/visibility/index.ts"
   ]
 }
