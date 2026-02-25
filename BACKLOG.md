@@ -25,11 +25,12 @@ Build a world-class, explicit Pi configuration system with:
 - [x] Intelligent bootstrap extension upgraded (`/bootstrap-repo` multi-lane synthesis + report).
 - [x] Control plane simplified to 5 targets (`meta/build/autopilot/research/daybook`).
 - [x] Orchestration now resolves repo-local `.pi/agents/{teams,pipelines}.yaml` first.
+- [x] Adaptive orchestration governor v1 shipped (progress scoring + observe/warn/enforce + loop/retry/budget/fuse tripwires).
 
 ### Still Open
 
 - [ ] Weekly rollup/aggregation over visibility telemetry NDJSON.
-- [ ] Pipeline execution budgets/circuit breakers in orchestration runtime.
+- [ ] Calibrate adaptive governor thresholds from telemetry and decide when to default to `enforce`.
 - [ ] Daybook model bakeoff automation (currently documented only).
 - [ ] Consolidated commit pass for current large working tree.
 
@@ -46,7 +47,7 @@ Build a world-class, explicit Pi configuration system with:
 ### Now
 
 - [ ] Add weekly telemetry rollup command for `~/.pi/agent/logs/primitive-usage.ndjson`.
-- [ ] Add orchestration execution guards: `maxTurns`, `maxRuntimeSeconds`, retries, failure policy.
+- [ ] Tune adaptive governor scoring/thresholds on real runs and tighten false-positive controls.
 - [ ] Extend bootstrap `--max` mode with a final consensus/scoring round.
 - [ ] Run bootstrap across active repos and capture deltas in per-repo notes.
 

@@ -10,6 +10,13 @@ import { Type } from "@sinclair/typebox";
 
 import { discoverAgents, type AgentConfig, type AgentScope } from "../subagent/agents";
 import { loadOrchestrationConfig, type PipelineSpec, type TeamMap, type PipelineMap } from "./config";
+import {
+  AdaptiveGovernor,
+  resolveGovernorPolicy,
+  type GovernorMode,
+  type GovernorOverrides,
+  type GovernorSummary,
+} from "./governor";
 
 const ORCHESTRATION_MESSAGE_TYPE = "orchestration";
 const ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE = "orchestration-synthesis";
@@ -19,6 +26,8 @@ const LOCK_RETRY_MAX_ATTEMPTS = 4;
 const LOCK_RETRY_BASE_DELAY_MS = 120;
 const SYNTHESIS_MAX_OUTPUT_CHARS_PER_MEMBER = 4_000;
 const SYNTHESIS_MAX_TOTAL_CHARS = 28_000;
+
+const GOVERNOR_MODE_ENUM = StringEnum(["observe", "warn", "enforce"] as const);
 
 const TEAM_TOOL_PARAMS = Type.Object({
   team: Type.String({ description: "Team name from agents/teams.yaml" }),
@@ -30,6 +39,10 @@ const TEAM_TOOL_PARAMS = Type.Object({
     }),
   ),
   concurrency: Type.Optional(Type.Integer({ minimum: 1, maximum: 8 })),
+  governorMode: Type.Optional(GOVERNOR_MODE_ENUM),
+  governorMaxCostUsd: Type.Optional(Type.Number({ minimum: 0.000001 })),
+  governorMaxTokens: Type.Optional(Type.Integer({ minimum: 1 })),
+  governorFuseSeconds: Type.Optional(Type.Integer({ minimum: 60 })),
 });
 
 const PIPELINE_TOOL_PARAMS = Type.Object({
@@ -41,6 +54,10 @@ const PIPELINE_TOOL_PARAMS = Type.Object({
       default: "both",
     }),
   ),
+  governorMode: Type.Optional(GOVERNOR_MODE_ENUM),
+  governorMaxCostUsd: Type.Optional(Type.Number({ minimum: 0.000001 })),
+  governorMaxTokens: Type.Optional(Type.Integer({ minimum: 1 })),
+  governorFuseSeconds: Type.Optional(Type.Integer({ minimum: 60 })),
 });
 
 interface AgentUsage {
@@ -61,6 +78,7 @@ interface AgentRunResult {
   output: string;
   error?: string;
   usage: AgentUsage;
+  governor?: GovernorSummary;
   stepIndex?: number;
 }
 
@@ -132,7 +150,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("team", {
-    description: "Run a team in parallel. Usage: /team <name> <goal>",
+    description: "Run a team in parallel. Usage: /team <name> <goal> [--concurrency N] [--gov-mode observe|warn|enforce]",
     handler: async (args, ctx) => {
       const parsed = parseNamedGoalArgs(args);
       if (!parsed.name) {
@@ -149,6 +167,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
       const result = await runTeam(pi, ctx, parsed.name, goal, {
         agentScope: parsed.scope,
         concurrency: parsed.concurrency,
+        governor: parsed.governor,
         onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
       });
 
@@ -184,7 +203,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("pipeline", {
-    description: "Run a pipeline. Usage: /pipeline <name> <goal>",
+    description: "Run a pipeline. Usage: /pipeline <name> <goal> [--gov-mode observe|warn|enforce]",
     handler: async (args, ctx) => {
       const parsed = parseNamedGoalArgs(args);
       if (!parsed.name) {
@@ -200,6 +219,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
 
       const result = await runPipeline(pi, ctx, parsed.name, goal, {
         agentScope: parsed.scope,
+        governor: parsed.governor,
         onDashboardUpdate: (dashboard) => onDashboardUpdate(ctx, dashboard),
       });
 
@@ -272,6 +292,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
       const result = await runTeam(pi, ctx, params.team, params.goal, {
         agentScope: (params.agentScope ?? "both") as AgentScope,
         concurrency: params.concurrency ?? 4,
+        governor: toGovernorOverrides(params),
         signal,
         onDashboardUpdate: (dashboard) => {
           onDashboardUpdate(ctx, dashboard);
@@ -315,6 +336,7 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
       const result = await runPipeline(pi, ctx, params.pipeline, params.goal, {
         agentScope: (params.agentScope ?? "both") as AgentScope,
+        governor: toGovernorOverrides(params),
         signal,
         onDashboardUpdate: (dashboard) => {
           onDashboardUpdate(ctx, dashboard);
@@ -398,6 +420,7 @@ async function runTeam(
   options: {
     agentScope: AgentScope;
     concurrency: number;
+    governor?: GovernorOverrides;
     signal?: AbortSignal;
     onDashboardUpdate: (state: DashboardState) => void;
   },
@@ -447,6 +470,7 @@ async function runTeam(
       agentName: member,
       task: `Team: ${teamName}\nGoal: ${goal}`,
       cwd: ctx.cwd,
+      governor: options.governor,
       signal: options.signal,
     });
 
@@ -470,6 +494,7 @@ async function runPipeline(
   goal: string,
   options: {
     agentScope: AgentScope;
+    governor?: GovernorOverrides;
     signal?: AbortSignal;
     onDashboardUpdate: (state: DashboardState) => void;
   },
@@ -534,6 +559,7 @@ async function runPipeline(
       agentName: step.agent,
       task,
       cwd: step.cwd ? resolveRuntimePath(step.cwd, ctx.cwd) : ctx.cwd,
+      governor: options.governor,
       signal: options.signal,
     });
 
@@ -679,8 +705,9 @@ function renderCard(card: AgentRunResult, width: number, theme: any): string[] {
   const sourceIcon = card.source === "project" ? "📁" : card.source === "user" ? "🧭" : "❔";
 
   const headerRaw = `${card.agent}${card.stepIndex ? ` (#${card.stepIndex})` : ""}`;
-  const statusRaw = `${icon} ${statusLabel}  ${sourceIcon} source:${card.source}`;
-  const usageRaw = formatUsage(card.usage);
+  const governorBadge = formatGovernorBadge(card.governor);
+  const statusRaw = `${icon} ${statusLabel}  ${sourceIcon} source:${card.source}${governorBadge ? `  ${governorBadge}` : ""}`;
+  const usageRaw = formatUsage(card.usage, card.governor);
   const snippetRaw = truncateLine(card.status === "failed" ? card.error || card.output : card.output, 200) || "(no output)";
 
   const top = theme.fg("borderMuted", `┌${"─".repeat(inner)}┐`);
@@ -743,7 +770,10 @@ function formatTeamSummary(result: TeamExecutionResult): string {
   ];
 
   for (const entry of result.results) {
-    lines.push(`- ${entry.agent} [${entry.status}] ${truncateLine(entry.output || entry.error || "(no output)", 120)}`);
+    const governorSuffix = entry.governor && entry.governor.status !== "ok"
+      ? ` gov=${entry.governor.status}${entry.governor.reason ? `:${entry.governor.reason}` : ""}`
+      : "";
+    lines.push(`- ${entry.agent} [${entry.status}]${governorSuffix} ${truncateLine(entry.output || entry.error || "(no output)", 120)}`);
   }
 
   return lines.join("\n");
@@ -763,7 +793,10 @@ function formatPipelineSummary(result: PipelineExecutionResult): string {
 
   for (const entry of result.results) {
     const stepLabel = entry.stepIndex ? `#${entry.stepIndex} ` : "";
-    lines.push(`- ${stepLabel}${entry.agent} [${entry.status}] ${truncateLine(entry.output || entry.error || "(no output)", 120)}`);
+    const governorSuffix = entry.governor && entry.governor.status !== "ok"
+      ? ` gov=${entry.governor.status}${entry.governor.reason ? `:${entry.governor.reason}` : ""}`
+      : "";
+    lines.push(`- ${stepLabel}${entry.agent} [${entry.status}]${governorSuffix} ${truncateLine(entry.output || entry.error || "(no output)", 120)}`);
   }
 
   return lines.join("\n");
@@ -796,6 +829,7 @@ interface RunAgentTaskOptions {
   agentName: string;
   task: string;
   cwd: string;
+  governor?: GovernorOverrides;
   signal?: AbortSignal;
 }
 
@@ -815,6 +849,7 @@ async function runAgentTask(_pi: ExtensionAPI, options: RunAgentTaskOptions): Pr
   return runAgentTaskWithConfig(config, {
     task: options.task,
     cwd: options.cwd,
+    governor: options.governor,
     signal: options.signal,
     maxAttempts: LOCK_RETRY_MAX_ATTEMPTS,
   });
@@ -825,6 +860,7 @@ async function runAgentTaskWithConfig(
   options: {
     task: string;
     cwd: string;
+    governor?: GovernorOverrides;
     signal?: AbortSignal;
     maxAttempts?: number;
   },
@@ -836,6 +872,7 @@ async function runAgentTaskWithConfig(
     const attemptResult = await runAgentTaskAttempt(config, {
       task: options.task,
       cwd: options.cwd,
+      governor: options.governor,
       signal: options.signal,
     });
 
@@ -875,6 +912,7 @@ async function runAgentTaskAttempt(
   options: {
     task: string;
     cwd: string;
+    governor?: GovernorOverrides;
     signal?: AbortSignal;
   },
 ): Promise<{ result: AgentRunResult; stderr: string }> {
@@ -904,7 +942,11 @@ async function runAgentTaskAttempt(
       usage: emptyUsage(),
     };
 
+    const governor = new AdaptiveGovernor(resolveGovernorPolicy(options.governor));
+
     let aborted = false;
+    let abortedByGovernor = false;
+    let governorAbortMessage: string | undefined;
 
     const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
       const child = spawn("pi", args, {
@@ -915,13 +957,47 @@ async function runAgentTaskAttempt(
 
       let stdoutBuffer = "";
       let stderrBuffer = "";
+      let governorTimer: ReturnType<typeof setInterval> | null = null;
+
+      const stopGovernorTimer = () => {
+        if (governorTimer) {
+          clearInterval(governorTimer);
+          governorTimer = null;
+        }
+      };
+
+      const abortChild = (origin: "signal" | "governor", message?: string) => {
+        if (aborted) {
+          return;
+        }
+        aborted = true;
+        stopGovernorTimer();
+        if (origin === "governor") {
+          abortedByGovernor = true;
+          governorAbortMessage = message ?? "governor policy triggered";
+        }
+
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (!child.killed) {
+            child.kill("SIGKILL");
+          }
+        }, 4000);
+      };
+
+      const evaluateGovernor = () => {
+        const decision = governor.evaluate(Date.now(), result.usage);
+        if (decision.action === "abort") {
+          abortChild("governor", decision.message);
+        }
+      };
 
       child.stdout.on("data", (chunk) => {
         stdoutBuffer += chunk.toString();
         const lines = stdoutBuffer.split("\n");
         stdoutBuffer = lines.pop() ?? "";
         for (const line of lines) {
-          applyJsonEvent(line, result);
+          applyJsonEvent(line, result, governor);
         }
       });
 
@@ -930,8 +1006,10 @@ async function runAgentTaskAttempt(
       });
 
       child.on("close", (code) => {
+        stopGovernorTimer();
+
         if (stdoutBuffer.trim()) {
-          applyJsonEvent(stdoutBuffer, result);
+          applyJsonEvent(stdoutBuffer, result, governor);
         }
 
         if (stderrBuffer.trim() && result.status !== "failed") {
@@ -942,36 +1020,38 @@ async function runAgentTaskAttempt(
       });
 
       child.on("error", (error) => {
+        stopGovernorTimer();
         result.status = "failed";
         result.error = error.message;
         resolve({ exitCode: 1, stderr: error.message });
       });
 
+      governorTimer = setInterval(evaluateGovernor, governor.policy.checkIntervalMs);
+
       if (options.signal) {
-        const abortChild = () => {
-          aborted = true;
-          child.kill("SIGTERM");
-          setTimeout(() => {
-            if (!child.killed) {
-              child.kill("SIGKILL");
-            }
-          }, 4000);
+        const abortFromSignal = () => {
+          abortChild("signal", "aborted");
         };
 
         if (options.signal.aborted) {
-          abortChild();
+          abortFromSignal();
         } else {
-          options.signal.addEventListener("abort", abortChild, { once: true });
+          options.signal.addEventListener("abort", abortFromSignal, { once: true });
         }
       }
     });
 
-    if (aborted) {
+    result.governor = governor.summarize(Date.now(), result.usage, abortedByGovernor);
+
+    if (abortedByGovernor) {
+      result.status = "failed";
+      result.error = governorAbortMessage ?? "governor policy triggered";
+    } else if (aborted) {
       result.status = "failed";
       result.error = "aborted";
     }
 
-    if (exitCode !== 0) {
+    if (exitCode !== 0 && !abortedByGovernor) {
       result.status = "failed";
       result.error = result.error || `exit code ${exitCode}`;
     }
@@ -988,16 +1068,29 @@ async function runAgentTaskAttempt(
   }
 }
 
-function applyJsonEvent(line: string, result: AgentRunResult): void {
+function applyJsonEvent(line: string, result: AgentRunResult, governor?: AdaptiveGovernor): void {
   if (!line.trim()) {
     return;
   }
 
   try {
-    const event = JSON.parse(line) as { type?: string; message?: Message };
+    const event = JSON.parse(line) as {
+      type?: string;
+      message?: Message;
+      toolCallId?: string;
+      toolName?: string;
+      args?: unknown;
+      isError?: boolean;
+    };
 
-    if (event.type === "tool_execution_start") {
+    if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
       result.usage.toolCalls += 1;
+      governor?.recordToolStart(event.toolCallId, event.toolName, event.args ?? {});
+      return;
+    }
+
+    if (event.type === "tool_execution_end" && event.toolCallId && event.toolName) {
+      governor?.recordToolEnd(event.toolCallId, event.toolName, event.isError === true);
       return;
     }
 
@@ -1013,6 +1106,7 @@ function applyJsonEvent(line: string, result: AgentRunResult): void {
     const text = extractAssistantText(message);
     if (text) {
       result.output = text;
+      governor?.recordAssistantMessage(text);
     }
 
     if (message.stopReason === "error" || message.stopReason === "aborted") {
@@ -1078,15 +1172,17 @@ function parseNamedGoalArgs(args: string): {
   goal: string;
   scope: AgentScope;
   concurrency: number;
+  governor: GovernorOverrides;
 } {
   const tokens = args.trim().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) {
-    return { name: null, goal: "", scope: "both", concurrency: 4 };
+    return { name: null, goal: "", scope: "both", concurrency: 4, governor: {} };
   }
 
   let name: string | null = null;
   let scope: AgentScope = "both";
   let concurrency = 4;
+  const governor: GovernorOverrides = {};
   const goalTokens: string[] = [];
 
   for (let index = 0; index < tokens.length; index++) {
@@ -1130,6 +1226,77 @@ function parseNamedGoalArgs(args: string): {
       continue;
     }
 
+    if ((token === "--gov-mode" || token === "--governor-mode") && tokens[index + 1]) {
+      const mode = parseGovernorMode(tokens[index + 1]);
+      if (mode) {
+        governor.mode = mode;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--gov-mode=") || token.startsWith("--governor-mode=")) {
+      const raw = token.includes("--gov-mode=")
+        ? token.slice("--gov-mode=".length)
+        : token.slice("--governor-mode=".length);
+      const mode = parseGovernorMode(raw);
+      if (mode) {
+        governor.mode = mode;
+      }
+      continue;
+    }
+
+    if (token === "--gov-max-cost" && tokens[index + 1]) {
+      const value = Number(tokens[index + 1]);
+      if (Number.isFinite(value) && value > 0) {
+        governor.maxCostUsd = value;
+      }
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--gov-max-cost=")) {
+      const value = Number(token.slice("--gov-max-cost=".length));
+      if (Number.isFinite(value) && value > 0) {
+        governor.maxCostUsd = value;
+      }
+      continue;
+    }
+
+    if (token === "--gov-max-tokens" && tokens[index + 1]) {
+      const value = Number(tokens[index + 1]);
+      if (Number.isFinite(value) && value > 0) {
+        governor.maxTokens = Math.floor(value);
+      }
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--gov-max-tokens=")) {
+      const value = Number(token.slice("--gov-max-tokens=".length));
+      if (Number.isFinite(value) && value > 0) {
+        governor.maxTokens = Math.floor(value);
+      }
+      continue;
+    }
+
+    if (token === "--gov-fuse-seconds" && tokens[index + 1]) {
+      const value = Number(tokens[index + 1]);
+      if (Number.isFinite(value) && value >= 60) {
+        governor.emergencyFuseSeconds = Math.floor(value);
+      }
+      index += 1;
+      continue;
+    }
+
+    if (token.startsWith("--gov-fuse-seconds=")) {
+      const value = Number(token.slice("--gov-fuse-seconds=".length));
+      if (Number.isFinite(value) && value >= 60) {
+        governor.emergencyFuseSeconds = Math.floor(value);
+      }
+      continue;
+    }
+
     goalTokens.push(token);
   }
 
@@ -1138,6 +1305,36 @@ function parseNamedGoalArgs(args: string): {
     goal: goalTokens.join(" "),
     scope,
     concurrency,
+    governor,
+  };
+}
+
+function parseGovernorMode(value: string): GovernorMode | null {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "observe" || normalized === "warn" || normalized === "enforce") {
+    return normalized as GovernorMode;
+  }
+  return null;
+}
+
+function toGovernorOverrides(input: {
+  governorMode?: string;
+  governorMaxCostUsd?: number;
+  governorMaxTokens?: number;
+  governorFuseSeconds?: number;
+}): GovernorOverrides {
+  const mode = parseGovernorMode(String(input.governorMode ?? ""));
+  return {
+    mode: mode ?? undefined,
+    maxCostUsd: Number.isFinite(input.governorMaxCostUsd) && (input.governorMaxCostUsd ?? 0) > 0
+      ? input.governorMaxCostUsd
+      : undefined,
+    maxTokens: Number.isFinite(input.governorMaxTokens) && (input.governorMaxTokens ?? 0) > 0
+      ? Math.floor(input.governorMaxTokens as number)
+      : undefined,
+    emergencyFuseSeconds: Number.isFinite(input.governorFuseSeconds) && (input.governorFuseSeconds ?? 0) >= 60
+      ? Math.floor(input.governorFuseSeconds as number)
+      : undefined,
   };
 }
 
@@ -1161,7 +1358,7 @@ function truncateLine(text: string, maxChars: number): string {
   return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
 }
 
-function formatUsage(usage: AgentUsage): string {
+function formatUsage(usage: AgentUsage, governor?: GovernorSummary): string {
   const parts: string[] = [];
   if (usage.turns > 0) {
     parts.push(`🔁 turns:${usage.turns}`);
@@ -1175,7 +1372,18 @@ function formatUsage(usage: AgentUsage): string {
   if (usage.cost > 0) {
     parts.push(`💰 $${usage.cost.toFixed(4)}`);
   }
+  if (governor && governor.status !== "ok") {
+    parts.push(`⚖ ${governor.status}${governor.reason ? `:${governor.reason}` : ""}`);
+  }
   return parts.join("  ") || "usage:none";
+}
+
+function formatGovernorBadge(governor?: GovernorSummary): string {
+  if (!governor || governor.status === "ok") {
+    return "";
+  }
+
+  return `⚖ ${governor.status}${governor.reason ? `:${governor.reason}` : ""}`;
 }
 
 function formatTokens(value: number): string {

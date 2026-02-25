@@ -23,7 +23,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `extensions/profiles`: `/profile` modes (`meta/ultrathink`, `execute`, `ship`, `fast`)
 - `extensions/organic-workflows`: code-enforced `/squash-merge` + high/critical review finding merge gate + local-first QMD memory ingest/search
 - `extensions/subagent`: `subagent` delegation tool (single, parallel, chain) with user/project agent scopes
-- `extensions/orchestration`: `/team` + `/pipeline` execution over declarative `agents/teams.yaml` and `agents/pipelines.yaml` with live dashboard UI
+- `extensions/orchestration`: `/team` + `/pipeline` execution over declarative `agents/teams.yaml` and `agents/pipelines.yaml` with live dashboard UI + adaptive governor guardrails
 - `extensions/visibility`: runtime visibility instrumentation (single-row footer + optional widget + NDJSON logs)
 - `extensions/daybook`: charisma-first one-on-one journaling posture with tone controls
 - `extensions/bootstrap`: intelligent `/bootstrap-repo` primitive (autonomous multi-lane exploration + synthesis) for repo-local `.pi/` foundations
@@ -146,6 +146,7 @@ See:
 - `docs/capability-slicing.md`
 - `docs/repo-bootstrap-workflow.md`
 - `docs/orchestration-playbook.md`
+- `docs/adaptive-orchestration-governor-v1.md`
 - `docs/primitives-cookbook.md`
 - `docs/daybook-model-evaluation.md`
 - `docs/workflow-first-slice-design.md`
@@ -182,6 +183,14 @@ Optional local-memory knobs (QMD):
 - `PI_MEMORY_MAX_CHARS_PER_SESSION`
 - `PI_MEMORY_SYNC_TTL_MS`
 - `PI_MEMORY_LOCAL_PRIORITY_BOOST` (default: `0.15`)
+
+Optional orchestration governor knobs:
+- `PI_ORCH_GOV_MODE` (`observe|warn|enforce`, default: `warn`)
+- `PI_ORCH_GOV_CHECK_SECONDS` (default: `75`)
+- `PI_ORCH_GOV_WINDOW_SECONDS` (default: `180`)
+- `PI_ORCH_GOV_EMERGENCY_FUSE_SECONDS` (default: `14400`)
+- `PI_ORCH_GOV_MAX_COST_USD` (optional)
+- `PI_ORCH_GOV_MAX_TOKENS` (optional)
 
 ## Extension Tests (lightweight harness)
 ```bash

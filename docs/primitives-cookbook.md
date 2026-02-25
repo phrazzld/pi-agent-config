@@ -43,6 +43,7 @@ Run example:
 
 - Extension: `extensions/orchestration/index.ts`
 - Shows team cards + pipeline graph in a live widget
+- Includes adaptive governor controls (`observe|warn|enforce`) for long-running subagent safety
 
 ## Primitive visibility instrumentation
 

@@ -64,3 +64,38 @@ Avoid:
 - hidden orchestration behavior
 - always-on maximal stacks for every repo
 - unbounded loops without checkpoints/circuit breakers
+
+## Adaptive orchestration governor (v1)
+
+Subagent execution now uses a progress-aware governor instead of short hard runtime caps.
+
+Modes:
+- `observe`: score and log only, never interrupt
+- `warn`: emit warnings when progress is weak or budgets trip
+- `enforce`: abort on sustained low-progress or direct tripwires
+
+Direct tripwires:
+- loop detection (repeated tool signatures with low novelty)
+- retry churn (repeated failures without recovery)
+- optional cost/token budget breach
+- emergency fuse breach (high safety cap)
+
+Defaults:
+- mode: `warn`
+- check interval: `75s`
+- scoring window: `180s`
+- emergency fuse: `4h`
+
+Env knobs:
+- `PI_ORCH_GOV_MODE`
+- `PI_ORCH_GOV_CHECK_SECONDS`
+- `PI_ORCH_GOV_WINDOW_SECONDS`
+- `PI_ORCH_GOV_EMERGENCY_FUSE_SECONDS`
+- `PI_ORCH_GOV_MAX_COST_USD`
+- `PI_ORCH_GOV_MAX_TOKENS`
+
+Command overrides (`/team`, `/pipeline`):
+- `--gov-mode observe|warn|enforce`
+- `--gov-max-cost <usd>`
+- `--gov-max-tokens <n>`
+- `--gov-fuse-seconds <seconds>`
