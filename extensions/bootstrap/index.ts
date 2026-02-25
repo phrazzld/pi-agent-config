@@ -590,9 +590,16 @@ function buildSettingsObject(_facts: RepoFacts): Record<string, unknown> {
 }
 
 function getRequiredExtensionAllowlist(): string[] {
-  return [
-    `+${path.join(getConfigDir(), "extensions", "organic-workflows")}`,
+  const extensionRoot = path.join(getConfigDir(), "extensions");
+  const required = [
+    "organic-workflows",
+    "profiles",
+    "subagent",
+    "orchestration",
+    "web-search",
   ];
+
+  return required.map((name) => `+${path.join(extensionRoot, name)}`);
 }
 
 function buildBootstrapReport(facts: RepoFacts, lanes: LaneResult[], notes: string[]): string {

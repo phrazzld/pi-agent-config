@@ -19,6 +19,12 @@ description: Organic reflection workflow for continuous Pi/process improvement (
 - Prefer a **subagent swarm** for research/exploration when available.
 - Swarms are recommended, not mandatory.
 
+## Auto context integration
+
+When available, `organic-workflows` injects an **Auto Reflect Context** message before execution.
+
+Treat this as baseline telemetry (session/tool stats, capability status, recent primitive trends), then deepen with targeted memory/web research.
+
 ## Skill bootstrap
 
 Before analysis, load these skills when available:

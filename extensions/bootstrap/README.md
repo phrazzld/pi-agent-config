@@ -67,3 +67,12 @@ In the target repository root:
 Generated workflow docs/prompts include local-first memory guidance (`/memory-ingest`, `/memory-search`, `/memory-context`).
 
 By default, existing files are preserved. Use `--force` to overwrite differing files.
+
+Bootstrap-generated `.pi/settings.json` now preserves a base extension capability set by default:
+- `organic-workflows`
+- `profiles`
+- `subagent`
+- `orchestration`
+- `web-search`
+
+This avoids accidental loss of orchestration/memory capabilities when local extension allow-lists are generated.

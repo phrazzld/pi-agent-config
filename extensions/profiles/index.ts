@@ -46,6 +46,23 @@ const PROFILES: Record<ProfileName, Profile> = {
   },
 };
 
+/**
+ * Always-on tool capabilities across all profiles/slices.
+ *
+ * Profile-specific tool sets still define the base interaction style, but these
+ * capabilities remain enabled when available so orchestration and memory flows
+ * are not accidentally hidden by profile switching.
+ */
+const BASE_CAPABILITY_TOOLS = [
+  "subagent",
+  "team_run",
+  "pipeline_run",
+  "memory_context",
+  "memory_search",
+  "memory_ingest",
+  "web_search",
+] as const;
+
 const PROFILE_DESCRIPTORS: ProfileDescriptor[] = [
   {
     name: "ultrathink",
@@ -175,16 +192,50 @@ async function applyProfile(
   pi.setThinkingLevel(profile.thinking);
 
   const availableTools = new Set(pi.getAllTools().map((tool) => tool.name));
-  const enabledTools = profile.tools.filter((tool) => availableTools.has(tool));
+
+  const enabledTools: string[] = [];
+  const seen = new Set<string>();
+  const includeIfAvailable = (tool: string) => {
+    if (!availableTools.has(tool) || seen.has(tool)) {
+      return;
+    }
+    seen.add(tool);
+    enabledTools.push(tool);
+  };
+
+  for (const tool of profile.tools) {
+    includeIfAvailable(tool);
+  }
+  for (const tool of BASE_CAPABILITY_TOOLS) {
+    includeIfAvailable(tool);
+  }
+
   if (enabledTools.length > 0) {
     pi.setActiveTools(enabledTools);
   }
 
+  const missingBaseCapabilities = BASE_CAPABILITY_TOOLS.filter(
+    (tool) => !availableTools.has(tool)
+  );
+
   pi.appendEntry<ProfileStateEntry>("profile-state", { name: profileName });
 
+  const descriptor = PROFILE_DESCRIPTORS.find((item) => item.name === profileName);
+  const display = descriptor ? `${descriptor.label} (${profileName})` : profileName;
+
+  if (missingBaseCapabilities.length > 0) {
+    const severity = missingBaseCapabilities.includes("subagent")
+      ? "warning"
+      : "info";
+    ctx.ui.notify(
+      `Profile ${display}: base capabilities unavailable in this runtime -> ${missingBaseCapabilities.join(
+        ", "
+      )}`,
+      severity
+    );
+  }
+
   if (notify) {
-    const descriptor = PROFILE_DESCRIPTORS.find((item) => item.name === profileName);
-    const display = descriptor ? `${descriptor.label} (${profileName})` : profileName;
     ctx.ui.notify(
       `Profile ${display}: thinking=${profile.thinking}, tools=${enabledTools.join(", ")}`,
       "info"

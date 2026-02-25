@@ -14,7 +14,20 @@ Opinionated workflow automation for:
    - switches/pulls default branch
    - automatically triggers `/reflect ...`
 
-2. **Local-first memory (QMD-backed)**
+2. **Auto context injection for `/reflect` and `/respond`**
+   - `before_agent_start` detects reflect/respond workflows via prompt markers
+   - injects an `Auto Reflect Context` block containing:
+     - session branch/tool-call snapshot
+     - subagent/team/pipeline capability status
+     - recent primitive-usage telemetry summary
+     - memory freshness status (`scope=both`)
+   - injects an `Auto PR Feedback Digest` block containing:
+     - detected PR + source counts (issue/inline/review-summary)
+     - severity/actionability triage summary
+     - hard-blocker count (critical/high actionable)
+     - ranked actionable findings with URLs
+
+3. **Local-first memory (QMD-backed)**
    - tools:
      - `memory_ingest`
      - `memory_search`

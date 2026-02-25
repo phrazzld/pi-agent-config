@@ -197,6 +197,17 @@ interface GitHubComment {
   };
 }
 
+interface GitHubReviewSummary {
+  id: number;
+  state?: string;
+  body?: string;
+  html_url?: string;
+  user?: {
+    login?: string;
+    type?: string;
+  };
+}
+
 interface BotReviewFinding {
   id: number;
   source: "issue_comment" | "review_comment";
@@ -205,6 +216,17 @@ interface BotReviewFinding {
   actionable: boolean;
   url: string;
   summary: string;
+}
+
+interface RespondDigestFinding {
+  id: number;
+  source: "issue_comment" | "review_comment" | "review_summary";
+  author: string;
+  authorType: "bot" | "human";
+  severity: ReviewSeverity;
+  actionable: boolean;
+  summary: string;
+  url: string;
 }
 
 interface PrReadinessReport {
@@ -218,6 +240,12 @@ const MEMORY_MODE = StringEnum(["keyword", "semantic", "hybrid"] as const);
 const MEMORY_SCOPE = StringEnum(["global", "local", "both"] as const);
 const ANSI_CSI_REGEX = new RegExp("\\u001b\\[[0-9;]*[A-Za-z]", "g");
 const ANSI_OSC_REGEX = new RegExp("\\u001b\\][^\\u0007]*\\u0007", "g");
+const REFLECT_PROMPT_MARKER = /^#\s*REFLECT\b/im;
+const RESPOND_PROMPT_MARKER = /^#\s*RESPOND\b/im;
+const AUTO_CONTEXT_MESSAGE_TYPE = "organic-workflows:auto-context";
+const AUTO_DIGEST_MAX_FINDINGS = 8;
+const AUTO_REFLECT_TOP_TOOL_LIMIT = 8;
+const AUTO_RESPOND_BODY_LIMIT = 8_000;
 
 export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
   pi.registerCommand("squash-merge", {
@@ -581,6 +609,539 @@ export default function organicWorkflowsExtension(pi: ExtensionAPI): void {
       }
     },
   });
+
+  pi.on("before_agent_start", async (event, ctx) => {
+    const prompt = typeof event.prompt === "string" ? event.prompt : "";
+    const autoContextBlocks: string[] = [];
+
+    if (isReflectWorkflowPrompt(prompt)) {
+      try {
+        const reflectContext = await buildAutoReflectContextBlock(pi, ctx);
+        if (reflectContext) {
+          autoContextBlocks.push(reflectContext);
+        }
+      } catch (error) {
+        autoContextBlocks.push(
+          [
+            "## Auto Reflect Context",
+            `- status: failed to build (${toErrorMessage(error)})`,
+            "- fallback: proceed with manual session/log replay",
+          ].join("\n")
+        );
+      }
+    }
+
+    if (isRespondWorkflowPrompt(prompt)) {
+      try {
+        const respondDigest = await buildAutoRespondDigestBlock(pi, ctx);
+        if (respondDigest) {
+          autoContextBlocks.push(respondDigest);
+        }
+      } catch (error) {
+        autoContextBlocks.push(
+          [
+            "## Auto PR Feedback Digest",
+            `- status: failed to build (${toErrorMessage(error)})`,
+            "- fallback: fetch pulls/comments/reviews manually via gh api",
+          ].join("\n")
+        );
+      }
+    }
+
+    if (autoContextBlocks.length === 0) {
+      return undefined;
+    }
+
+    return {
+      message: {
+        customType: AUTO_CONTEXT_MESSAGE_TYPE,
+        content: autoContextBlocks.join("\n\n---\n\n"),
+        display: true,
+        details: {
+          generatedAt: new Date().toISOString(),
+          contexts: autoContextBlocks.length,
+        },
+      },
+    };
+  });
+}
+
+function isReflectWorkflowPrompt(prompt: string): boolean {
+  return REFLECT_PROMPT_MARKER.test(prompt || "");
+}
+
+function isRespondWorkflowPrompt(prompt: string): boolean {
+  return RESPOND_PROMPT_MARKER.test(prompt || "");
+}
+
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (error === undefined || error === null) {
+    return "unknown error";
+  }
+  return String(error);
+}
+
+async function buildAutoReflectContextBlock(pi: ExtensionAPI, ctx: ExtensionContext): Promise<string> {
+  const branchStats = collectSessionBranchStats(ctx);
+  const availableTools = new Set(pi.getAllTools().map((tool) => tool.name));
+  const activeTools = new Set(pi.getActiveTools().map((tool) => String(tool)));
+
+  const subagentStatus = describeToolStatus("subagent", availableTools, activeTools);
+  const teamRunStatus = describeToolStatus("team_run", availableTools, activeTools);
+  const pipelineRunStatus = describeToolStatus("pipeline_run", availableTools, activeTools);
+  const memoryContextStatus = describeToolStatus("memory_context", availableTools, activeTools);
+
+  const primitiveSummary = await readPrimitiveUsageSummary();
+  const memoryStale = await isMemoryStale(pi, ctx.cwd, "both").catch(() => null);
+
+  const lines: string[] = [
+    "## Auto Reflect Context",
+    `- generatedAt: ${new Date().toISOString()}`,
+    `- subagent: ${subagentStatus}`,
+    `- team_run: ${teamRunStatus}`,
+    `- pipeline_run: ${pipelineRunStatus}`,
+    `- memory_context: ${memoryContextStatus}`,
+    memoryStale === null ? "- memoryFreshness(scope=both): unknown" : `- memoryFreshness(scope=both): ${memoryStale ? "stale" : "fresh"}`,
+    "",
+    "### Session branch snapshot",
+    `- entries: ${branchStats.entries}`,
+    `- user messages: ${branchStats.userMessages}`,
+    `- assistant messages: ${branchStats.assistantMessages}`,
+    `- tool results: ${branchStats.toolResults}`,
+    `- tool calls: ${branchStats.toolCalls}`,
+    `- top tools: ${branchStats.topTools || "none"}`,
+  ];
+
+  if (branchStats.latestCompaction) {
+    lines.push(
+      `- latest compaction: tokensBefore=${branchStats.latestCompaction.tokensBefore}, readFiles=${branchStats.latestCompaction.readFiles}, modifiedFiles=${branchStats.latestCompaction.modifiedFiles}`
+    );
+  }
+
+  if (primitiveSummary) {
+    lines.push(
+      "",
+      "### Recent primitive telemetry",
+      `- sampled runs: ${primitiveSummary.runCount}`,
+      `- avg duration: ${primitiveSummary.avgDurationSeconds}s`,
+      `- top run tools: ${primitiveSummary.topRunTools || "none"}`,
+      `- top run skills: ${primitiveSummary.topRunSkills || "none"}`,
+    );
+  }
+
+  lines.push(
+    "",
+    "### Guidance",
+    subagentStatus === "enabled"
+      ? "- Subagents are available: prefer parallel lane delegation when work is naturally partitionable."
+      : "- Subagents are not currently enabled: note the limitation and proceed sequentially.",
+    "- Keep recommendations small/reversible and tied to observed repetition.",
+  );
+
+  return lines.join("\n");
+}
+
+function collectSessionBranchStats(ctx: ExtensionContext): {
+  entries: number;
+  userMessages: number;
+  assistantMessages: number;
+  toolResults: number;
+  toolCalls: number;
+  topTools: string;
+  latestCompaction: { tokensBefore: number; readFiles: number; modifiedFiles: number } | null;
+} {
+  const branch = ctx.sessionManager.getBranch();
+  let userMessages = 0;
+  let assistantMessages = 0;
+  let toolResults = 0;
+  let toolCalls = 0;
+  const toolCount = new Map<string, number>();
+  let latestCompaction: { tokensBefore: number; readFiles: number; modifiedFiles: number } | null = null;
+
+  for (const entry of branch) {
+    if (entry.type === "message") {
+      const message = entry.message as any;
+      const role = String(message?.role ?? "");
+      if (role === "user") {
+        userMessages += 1;
+      } else if (role === "assistant") {
+        assistantMessages += 1;
+        const content = Array.isArray(message?.content) ? message.content : [];
+        for (const part of content) {
+          if (part?.type !== "toolCall") {
+            continue;
+          }
+          toolCalls += 1;
+          const toolName = String(part?.name ?? "unknown");
+          toolCount.set(toolName, (toolCount.get(toolName) ?? 0) + 1);
+        }
+      } else if (role === "toolResult") {
+        toolResults += 1;
+      }
+      continue;
+    }
+
+    if (entry.type === "compaction") {
+      const details = (entry.details ?? {}) as {
+        readFiles?: unknown;
+        modifiedFiles?: unknown;
+      };
+
+      latestCompaction = {
+        tokensBefore: Number(entry.tokensBefore ?? 0),
+        readFiles: Array.isArray(details.readFiles) ? details.readFiles.length : 0,
+        modifiedFiles: Array.isArray(details.modifiedFiles) ? details.modifiedFiles.length : 0,
+      };
+    }
+  }
+
+  const topTools = Array.from(toolCount.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, AUTO_REFLECT_TOP_TOOL_LIMIT)
+    .map(([tool, count]) => `${tool}:${count}`)
+    .join(", ");
+
+  return {
+    entries: branch.length,
+    userMessages,
+    assistantMessages,
+    toolResults,
+    toolCalls,
+    topTools,
+    latestCompaction,
+  };
+}
+
+function describeToolStatus(
+  toolName: string,
+  availableTools: ReadonlySet<string>,
+  activeTools: ReadonlySet<string>,
+): string {
+  if (!availableTools.has(toolName)) {
+    return "missing";
+  }
+  if (activeTools.has(toolName)) {
+    return "enabled";
+  }
+  return "available-but-inactive";
+}
+
+async function readPrimitiveUsageSummary(): Promise<{
+  runCount: number;
+  avgDurationSeconds: number;
+  topRunTools: string;
+  topRunSkills: string;
+} | null> {
+  const logPath = path.join(getConfigDir(), "logs", "primitive-usage.ndjson");
+  if (!existsSync(logPath)) {
+    return null;
+  }
+
+  const raw = await fs.readFile(logPath, "utf8").catch(() => "");
+  if (!raw.trim()) {
+    return null;
+  }
+
+  const parsed = raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line) as {
+          durationMs?: number;
+          runTools?: Record<string, number>;
+          runSkills?: string[];
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is { durationMs?: number; runTools?: Record<string, number>; runSkills?: string[] } =>
+      Boolean(entry)
+    );
+
+  if (parsed.length === 0) {
+    return null;
+  }
+
+  const recent = parsed.slice(-20);
+  const toolCounts = new Map<string, number>();
+  const skillCounts = new Map<string, number>();
+  let durationTotal = 0;
+  let durationCount = 0;
+
+  for (const entry of recent) {
+    const duration = Number(entry.durationMs ?? NaN);
+    if (Number.isFinite(duration) && duration >= 0) {
+      durationTotal += duration;
+      durationCount += 1;
+    }
+
+    for (const [tool, count] of Object.entries(entry.runTools ?? {})) {
+      const numeric = Number(count ?? 0);
+      if (!Number.isFinite(numeric) || numeric <= 0) {
+        continue;
+      }
+      toolCounts.set(tool, (toolCounts.get(tool) ?? 0) + numeric);
+    }
+
+    for (const skill of entry.runSkills ?? []) {
+      const key = String(skill);
+      if (!key) {
+        continue;
+      }
+      skillCounts.set(key, (skillCounts.get(key) ?? 0) + 1);
+    }
+  }
+
+  const avgDurationSeconds =
+    durationCount === 0 ? 0 : Number((durationTotal / durationCount / 1000).toFixed(1));
+
+  return {
+    runCount: recent.length,
+    avgDurationSeconds,
+    topRunTools: formatTopCounter(toolCounts, 6),
+    topRunSkills: formatTopCounter(skillCounts, 6),
+  };
+}
+
+function formatTopCounter(counter: Map<string, number>, limit: number): string {
+  return Array.from(counter.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([key, value]) => `${key}:${value}`)
+    .join(", ");
+}
+
+async function buildAutoRespondDigestBlock(pi: ExtensionAPI, ctx: ExtensionContext): Promise<string> {
+  const prNumber = await detectCurrentBranchPrNumber(pi, ctx.cwd);
+  if (!prNumber) {
+    return [
+      "## Auto PR Feedback Digest",
+      "- status: no pull request detected for current branch",
+      "- action: resolve PR context first (`gh pr status`) before triage",
+    ].join("\n");
+  }
+
+  const repo = await getRepoIdentity(pi, ctx.cwd);
+  if (!repo) {
+    return [
+      "## Auto PR Feedback Digest",
+      `- PR: #${prNumber}`,
+      "- status: could not resolve repository owner/name",
+    ].join("\n");
+  }
+
+  const [meta, issueCommentsRaw, reviewCommentsRaw, reviewSummariesRaw] = await Promise.all([
+    ghJson<PullRequestMeta>(pi, ctx.cwd, [
+      "pr",
+      "view",
+      String(prNumber),
+      "--json",
+      "number,title,url,state,isDraft,mergeStateStatus,reviewDecision",
+    ]),
+    ghJson<GitHubComment[]>(pi, ctx.cwd, [
+      "api",
+      `repos/${repo.owner}/${repo.name}/issues/${prNumber}/comments?per_page=100`,
+    ]),
+    ghJson<GitHubComment[]>(pi, ctx.cwd, [
+      "api",
+      `repos/${repo.owner}/${repo.name}/pulls/${prNumber}/comments?per_page=100`,
+    ]),
+    ghJson<GitHubReviewSummary[]>(pi, ctx.cwd, [
+      "api",
+      `repos/${repo.owner}/${repo.name}/pulls/${prNumber}/reviews?per_page=100`,
+    ]),
+  ]);
+
+  const warnings: string[] = [];
+  if (!issueCommentsRaw) warnings.push("issues comments fetch failed");
+  if (!reviewCommentsRaw) warnings.push("inline review comments fetch failed");
+  if (!reviewSummariesRaw) warnings.push("review summaries fetch failed");
+
+  const issueComments = issueCommentsRaw ?? [];
+  const reviewComments = reviewCommentsRaw ?? [];
+  const reviewSummaries = reviewSummariesRaw ?? [];
+
+  const findings = collectRespondDigestFindings(issueComments, reviewComments, reviewSummaries);
+  const actionable = findings.filter((finding) => finding.actionable && finding.severity !== "none");
+  const hardBlockers = actionable.filter((finding) =>
+    isHardBlockingFinding(finding.authorType, finding.severity, true)
+  );
+
+  const severityCounts = {
+    critical: actionable.filter((finding) => finding.severity === "critical").length,
+    high: actionable.filter((finding) => finding.severity === "high").length,
+    medium: actionable.filter((finding) => finding.severity === "medium").length,
+    low: actionable.filter((finding) => finding.severity === "low").length,
+  };
+
+  const reviewStateCounts = new Map<string, number>();
+  for (const review of reviewSummaries) {
+    const state = String(review.state ?? "UNKNOWN").toUpperCase();
+    reviewStateCounts.set(state, (reviewStateCounts.get(state) ?? 0) + 1);
+  }
+
+  const topActionable = actionable
+    .sort((left, right) => {
+      const severityDelta = severityWeight(right.severity) - severityWeight(left.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      if (left.authorType !== right.authorType) {
+        return left.authorType === "human" ? -1 : 1;
+      }
+      return left.id - right.id;
+    })
+    .slice(0, AUTO_DIGEST_MAX_FINDINGS);
+
+  const lines: string[] = [
+    "## Auto PR Feedback Digest",
+    `- PR: #${prNumber}${meta?.title ? ` ${meta.title}` : ""}`,
+    meta?.url ? `- URL: ${meta.url}` : "",
+    `- source counts: issue_comments=${issueComments.length}, inline_comments=${reviewComments.length}, review_summaries=${reviewSummaries.length}`,
+    `- actionable findings: ${actionable.length} (critical=${severityCounts.critical}, high=${severityCounts.high}, medium=${severityCounts.medium}, low=${severityCounts.low})`,
+    `- hard blockers (critical/high actionable): ${hardBlockers.length}`,
+    reviewStateCounts.size > 0
+      ? `- review states: ${Array.from(reviewStateCounts.entries())
+          .map(([state, count]) => `${state}:${count}`)
+          .join(", ")}`
+      : "",
+  ].filter(Boolean);
+
+  if (warnings.length > 0) {
+    lines.push(`- warnings: ${warnings.join("; ")}`);
+  }
+
+  lines.push("", "### Top actionable findings");
+
+  if (topActionable.length === 0) {
+    lines.push("- none detected from fetched comment bodies");
+  } else {
+    for (const finding of topActionable) {
+      const location = finding.url ? ` — ${finding.url}` : "";
+      lines.push(
+        `- [${finding.severity.toUpperCase()}][${finding.authorType}][${finding.source}] ${finding.summary}${location}`
+      );
+    }
+  }
+
+  lines.push(
+    "",
+    "### Triage hint",
+    "- Address hard blockers first, then medium findings, then low-severity polish.",
+    "- Keep responses in the required Classification/Severity/Decision/Change/Verification structure.",
+  );
+
+  return lines.join("\n");
+}
+
+function collectRespondDigestFindings(
+  issueComments: GitHubComment[],
+  reviewComments: GitHubComment[],
+  reviewSummaries: GitHubReviewSummary[],
+): RespondDigestFinding[] {
+  const findings: RespondDigestFinding[] = [];
+  const seen = new Set<string>();
+
+  const pushFinding = (finding: RespondDigestFinding) => {
+    const key = `${finding.source}:${finding.id}`;
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    findings.push(finding);
+  };
+
+  for (const comment of issueComments) {
+    const body = (comment.body ?? "").slice(0, AUTO_RESPOND_BODY_LIMIT);
+    if (!body.trim()) {
+      continue;
+    }
+
+    pushFinding({
+      id: comment.id,
+      source: "issue_comment",
+      author: comment.user?.login ?? "unknown",
+      authorType: toReviewerSource(comment.user?.login, comment.user?.type),
+      severity: classifyReviewSeverity(body),
+      actionable: isActionableReviewFinding(body),
+      summary: summarizeFinding(body),
+      url: comment.html_url ?? "",
+    });
+  }
+
+  for (const comment of reviewComments) {
+    const body = (comment.body ?? "").slice(0, AUTO_RESPOND_BODY_LIMIT);
+    if (!body.trim()) {
+      continue;
+    }
+
+    pushFinding({
+      id: comment.id,
+      source: "review_comment",
+      author: comment.user?.login ?? "unknown",
+      authorType: toReviewerSource(comment.user?.login, comment.user?.type),
+      severity: classifyReviewSeverity(body),
+      actionable: isActionableReviewFinding(body),
+      summary: summarizeFinding(body),
+      url: comment.html_url ?? "",
+    });
+  }
+
+  for (const review of reviewSummaries) {
+    const body = (review.body ?? "").slice(0, AUTO_RESPOND_BODY_LIMIT).trim();
+    const state = String(review.state ?? "").toUpperCase();
+    const fallbackBody = body || (state === "CHANGES_REQUESTED" ? "Review state: CHANGES_REQUESTED" : "");
+    if (!fallbackBody) {
+      continue;
+    }
+
+    const severity = body
+      ? classifyReviewSeverity(fallbackBody)
+      : state === "CHANGES_REQUESTED"
+        ? "high"
+        : "none";
+    const actionable = body
+      ? isActionableReviewFinding(fallbackBody)
+      : state === "CHANGES_REQUESTED";
+
+    pushFinding({
+      id: review.id,
+      source: "review_summary",
+      author: review.user?.login ?? "unknown",
+      authorType: toReviewerSource(review.user?.login, review.user?.type),
+      severity,
+      actionable,
+      summary: summarizeFinding(fallbackBody),
+      url: review.html_url ?? "",
+    });
+  }
+
+  return findings;
+}
+
+function toReviewerSource(login?: string, type?: string): "bot" | "human" {
+  return isBotAuthor(login, type) ? "bot" : "human";
+}
+
+function severityWeight(severity: ReviewSeverity): number {
+  switch (severity) {
+    case "critical":
+      return 5;
+    case "high":
+      return 4;
+    case "medium":
+      return 3;
+    case "low":
+      return 2;
+    default:
+      return 1;
+  }
 }
 
 async function ingestMemory(pi: ExtensionAPI, ctx: ExtensionContext, options: IngestOptions): Promise<IngestSummary> {

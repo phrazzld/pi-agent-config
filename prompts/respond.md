@@ -15,6 +15,12 @@ Every GitHub comment/reply must be:
 5. **Clean**: no raw logs/stdout dumps or noisy stack traces
 6. **Professional**: respectful, accountable, and specific
 
+## Auto digest integration
+
+When available, `organic-workflows` injects an **Auto PR Feedback Digest** message before execution.
+
+Use it as your initial triage baseline, then fetch fresh GitHub state to confirm no deltas before posting final replies.
+
 ## Workflow
 
 1. **Discover PR context**

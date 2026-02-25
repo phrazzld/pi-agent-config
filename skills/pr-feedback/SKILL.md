@@ -9,6 +9,8 @@ Use this skill when asked to respond to review comments, "review input", or "add
 
 ## Required execution pattern
 
+If an `Auto PR Feedback Digest` message is present in context, use it as the initial triage seed. Still refresh GitHub data before posting final replies.
+
 1. Detect the PR for the current branch (`gh pr status`).
 2. Fetch feedback via GH CLI APIs:
    - `pulls/<pr>/comments`

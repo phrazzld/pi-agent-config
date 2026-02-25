@@ -2,6 +2,17 @@
 
 Adds profile modes for thinking + tool activation.
 
+Profiles now preserve explicit **always-on base capabilities** when available:
+- `subagent`
+- `team_run`
+- `pipeline_run`
+- `memory_context`
+- `memory_search`
+- `memory_ingest`
+- `web_search`
+
+This keeps orchestration/memory primitives available across slices (`meta/build/ship/fast`) while still allowing profile-specific tool emphasis.
+
 Canonical profile names:
 - `ultrathink`
 - `execute`
