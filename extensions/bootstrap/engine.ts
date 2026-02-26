@@ -246,7 +246,15 @@ export async function bootstrapRepo(
         progress.setWriteProgress(changes);
         continue;
       }
-      await writePlannedFile(absolutePath, content, options.force, changes);
+      const personaManagedPath = relativePath === ".pi/persona.md" || relativePath === "AGENTS.md";
+      const allowOverwrite = options.force || personaManagedPath;
+      const overwriteReason = options.force
+        ? "overwritten by --force"
+        : personaManagedPath
+        ? "managed persona artifact refreshed"
+        : "overwritten by --force";
+
+      await writePlannedFile(absolutePath, content, allowOverwrite, changes, overwriteReason);
       progress.setWriteProgress(changes);
     }
 
@@ -1660,6 +1668,7 @@ async function writePlannedFile(
   content: string,
   force: boolean,
   changes: BootstrapChange[],
+  overwriteReason = "overwritten by --force",
 ): Promise<void> {
   await mkdir(path.dirname(filePath), { recursive: true });
 
@@ -1681,7 +1690,7 @@ async function writePlannedFile(
   }
 
   await writeFile(filePath, content, "utf8");
-  changes.push({ path: filePath, action: "updated", reason: "overwritten by --force" });
+  changes.push({ path: filePath, action: "updated", reason: overwriteReason });
 }
 
 export function resolveOutputPath(repoRoot: string, relativePath: string): string | null {
