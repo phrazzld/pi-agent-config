@@ -7,7 +7,7 @@
 | Extension | Commands | Tools | Test files |
 |---|---:|---:|---:|
 | `bootstrap` | 1 | 1 | 2 |
-| `daybook` | 2 | 0 | 0 |
+| `daybook` | 3 | 0 | 0 |
 | `guardrails` | 4 | 0 | 1 |
 | `handoff` | 1 | 0 | 0 |
 | `ops-watchdog` | 3 | 0 | 0 |
@@ -25,7 +25,7 @@
 - tools: `bootstrap_repo`
 
 ### daybook
-- commands: `/daybook-kickoff`, `/daybook-tone`
+- commands: `/daybook`, `/daybook-kickoff`, `/daybook-tone`
 - tools: (none)
 
 ### guardrails
@@ -66,35 +66,15 @@
 
 ## Slice Composition
 
-### autopilot
-- default profile: `ship`
-- description: Full issue-to-PR slice with retrieval, delegation, orchestration visibility, and merge governance.
-- extensions: `guardrails`, `profiles`, `handoff`, `web-search`, `subagent`, `orchestration`, `visibility`, `organic-workflows`
-
-### baseline
-- default profile: `execute`
-- description: Minimal safety-first default for day-to-day work.
-- extensions: `guardrails`, `profiles`, `handoff`
-
 ### daybook
 - default profile: `fast`
 - description: Charisma-first one-on-one journaling slice with selective retrieval and memory tools.
 - extensions: `profiles`, `handoff`, `web-search`, `organic-workflows`, `daybook`, `visibility`
 
-### delivery
-- default profile: `execute`
-- description: Implementation + PR governance + delegated execution with team/pipeline orchestration.
-- extensions: `guardrails`, `profiles`, `handoff`, `subagent`, `orchestration`, `visibility`, `organic-workflows`
-
-### pi-dev
+### meta
 - default profile: `meta`
-- description: Pi-config development slice for extension/prompt/skill architecture work with maximum primitive visibility.
+- description: Meta-engineering slice for pi-config work, prompt design, and architecture.
 - extensions: `guardrails`, `profiles`, `handoff`, `web-search`, `subagent`, `bootstrap`, `orchestration`, `visibility`
-
-### research
-- default profile: `meta`
-- description: Research-heavy slice with web retrieval and visibility instrumentation.
-- extensions: `guardrails`, `profiles`, `handoff`, `web-search`, `subagent`, `visibility`
 
 ### software
 - default profile: `execute`

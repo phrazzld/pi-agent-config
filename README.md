@@ -138,11 +138,13 @@ pictl
 pictl list
 pictl meta
 pictl build
-pictl autopilot
-pictl research
 pictl daybook
 pictl ops
 ```
+
+Capability note:
+- `autopilot` is a build capability (pipeline), not a top-level control-plane target.
+- `research` runs inside active repo context (usually `meta` or `build`), not a top-level target.
 
 Default policy:
 - In `pi-agent-config`, start with `pictl meta`.
@@ -152,9 +154,10 @@ Slice launcher (low-level):
 
 ```bash
 pictl slices
-pictl slice pi-dev --profile meta
-pictl slice research --profile meta
-pictl slice --strict research --profile meta
+pictl slice meta --profile meta
+pictl slice software --profile execute
+pictl slice daybook --profile fast
+pictl slice sysadmin --profile execute
 ```
 
 One-off without install:

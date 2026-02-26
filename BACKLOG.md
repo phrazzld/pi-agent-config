@@ -10,7 +10,7 @@ Build a world-class, explicit Pi configuration system with:
 
 1. maximum primitive visibility (status/TUI + logs),
 2. explicit orchestration (skills/agents/teams/pipelines/extensions),
-3. workflow-first control plane (`meta`, `build`, `autopilot`, `research`, `daybook`, `ops`),
+3. workflow-first control plane kernels (`meta`, `build`, `daybook`, `ops`) with capability overlays (autopilot/research),
 4. intelligent repo bootstrap that synthesizes repo-local `.pi` foundations.
 
 ## Session Snapshot (2026-02-25)
@@ -23,7 +23,7 @@ Build a world-class, explicit Pi configuration system with:
 - [x] Orchestration extension added (`/teams`, `/pipelines`, `/team`, `/pipeline`, dashboard UI).
 - [x] Daybook extension + slice added (charisma-first posture).
 - [x] Intelligent bootstrap extension upgraded (`/bootstrap-repo` multi-lane synthesis + report).
-- [x] Control plane expanded to 6 targets (`meta/build/autopilot/research/daybook/ops`).
+- [x] Control plane simplified to 4 kernel targets (`meta/build/daybook/ops`) with capability overlays for autopilot/research.
 - [x] Orchestration now resolves repo-local `.pi/agents/{teams,pipelines}.yaml` first.
 - [x] Adaptive orchestration governor v1 shipped (progress scoring + observe/warn/enforce + loop/retry/budget/fuse tripwires).
 - [x] Sysadmin reliability stack shipped: `handoff`, `ops-watchdog`, `sysadmin` slice, and `pictl ops` target.
@@ -43,7 +43,7 @@ Build a world-class, explicit Pi configuration system with:
 
 ## Restart Checklist (next session)
 
-1. `pictl list` (confirm 6 workflow targets, including `ops`)
+1. `pictl list` (confirm kernel targets: `meta`, `build`, `daybook`, `ops`)
 2. `pictl meta`
 3. `/bootstrap-repo --domain <repo>` in each active product repository
 4. Exit, relaunch per repo with `pictl build`
@@ -83,7 +83,7 @@ Goal: evolve `pi-agent-config` from loose config pack into a stable, opinionated
 ### v1 framework pillars
 
 1. **Stable defaults**: safety-first baseline extensions, bounded orchestration, bounded logging, and explicit profiles.
-2. **Composable packs**: workflow slices (`meta/build/autopilot/research/daybook/ops`) as first-class capability bundles.
+2. **Composable packs**: kernel slices (`meta/build/daybook/ops`) plus capability overlays (`autopilot`, `research`).
 3. **Contracted extension APIs**: small, documented extension contracts with runtime invariants and smoke tests.
 4. **Operational UX**: one-command launch (`pictl <target>`), clear status commands, and failure-mode playbooks.
 5. **Upgrade lane**: predictable migration path for settings/slices/extensions across versions.

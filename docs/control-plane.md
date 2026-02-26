@@ -10,12 +10,14 @@ These are the only interactive picker targets:
 
 - `meta` — evolve Pi platform config, slices, extensions, agents, prompts
 - `build` — daily software engineering in product repositories
-- `autopilot` — bounded issue-to-PR execution workflow
-- `research` — deep docs/retrieval investigations
-- `daybook` — charisma-first one-on-one journaling
+- `daybook` — charisma-first journaling and brainstorming workflow
 - `ops` — system reliability, incident forensics, and watchdog workflows
 
-Legacy names still resolve as aliases (`delivery`, `software`, `ship`, `sysadmin`, `argus`, etc.).
+Legacy names still resolve as aliases (`delivery`, `software`, `ship`, `autopilot`, `research`, `sysadmin`, `argus`, etc.).
+
+Capability posture is layered inside these kernels:
+- **autopilot** is a build capability (pipeline/agent workflow), not a top-level target
+- **research** is done inside meta/build/daybook context, not as a separate target
 
 ## Commands
 
@@ -38,8 +40,6 @@ pictl
 pictl list
 pictl meta
 pictl build
-pictl autopilot
-pictl research
 pictl daybook
 pictl ops
 ```
@@ -48,11 +48,10 @@ Low-level slice launcher:
 
 ```bash
 pictl slices
-pictl slice pi-dev --profile meta
+pictl slice meta --profile meta
 pictl slice software --profile execute
 pictl slice daybook --profile fast
 pictl slice sysadmin --profile execute
-pictl slice --strict research --profile meta
 ```
 
 One-off execution without install:
@@ -70,10 +69,8 @@ go run ./cmd/pictl meta
 
 | Target | Slice | Default Profile |
 |---|---|---|
-| `meta` | `pi-dev` | `meta` (`ultrathink`) |
+| `meta` | `meta` | `meta` (`ultrathink`) |
 | `build` | `software` | `execute` |
-| `autopilot` | `autopilot` | `ship` |
-| `research` | `research` | `meta` (`ultrathink`) |
 | `daybook` | `daybook` | `fast` |
 | `ops` | `sysadmin` | `execute` |
 
@@ -97,8 +94,6 @@ alias i='pi'
 alias io='pictl'
 alias imeta='pictl meta'
 alias ibuild='pictl build'
-alias iauto='pictl autopilot'
-alias iresearch='pictl research'
 alias idaybook='pictl daybook'
 alias iops='pictl ops'
 ```

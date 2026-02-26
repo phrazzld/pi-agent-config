@@ -38,31 +38,17 @@ type SliceInfo struct {
 var canonicalTargets = []Target{
 	{
 		Name:           "meta",
-		Slice:          "pi-dev",
+		Slice:          "meta",
 		DefaultProfile: "meta",
 		Description:    "Pi platform architecture + orchestration development",
-		Aliases:        []string{"pi-dev", "pidev"},
+		Aliases:        []string{"pi-dev", "pidev", "recon", "docs"},
 	},
 	{
 		Name:           "build",
 		Slice:          "software",
 		DefaultProfile: "execute",
 		Description:    "Daily software engineering workflow",
-		Aliases:        []string{"software", "delivery", "dev", "eng", "work", "devflow"},
-	},
-	{
-		Name:           "autopilot",
-		Slice:          "autopilot",
-		DefaultProfile: "ship",
-		Description:    "Bounded issue-to-PR automation workflow",
-		Aliases:        []string{"auto", "ship", "release"},
-	},
-	{
-		Name:           "research",
-		Slice:          "research",
-		DefaultProfile: "meta",
-		Description:    "Deep docs + retrieval investigations",
-		Aliases:        []string{"docs", "recon"},
+		Aliases:        []string{"software", "delivery", "dev", "eng", "work", "devflow", "ship", "release", "auto", "autopilot", "research"},
 	},
 	{
 		Name:           "ops",
@@ -75,7 +61,7 @@ var canonicalTargets = []Target{
 		Name:           "daybook",
 		Slice:          "daybook",
 		DefaultProfile: "fast",
-		Description:    "Charisma-first journaling workflow",
+		Description:    "Charisma-first journaling and brainstorming workflow",
 		Aliases:        []string{"journal", "diary"},
 	},
 }

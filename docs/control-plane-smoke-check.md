@@ -13,7 +13,7 @@ pictl slices
 
 Expected:
 - `doctor` shows this repo as root and reports targets/slices.
-- `list` shows: `meta`, `build`, `autopilot`, `research`, `daybook`, `ops`.
+- `list` shows: `meta`, `build`, `daybook`, `ops`.
 
 ## 2) Meta default in this repo
 
@@ -22,7 +22,7 @@ pictl meta
 ```
 
 Expected:
-- Pi starts with `pi-dev` slice.
+- Pi starts with `meta` slice.
 - Profile defaults to `meta` (alias of `ultrathink`) unless overridden.
 
 ## 3) Build + daybook + ops launch paths
@@ -41,7 +41,7 @@ Expected:
 ## 4) Strict slice launch path
 
 ```bash
-pictl slice --strict research --profile meta
+pictl slice --strict meta --profile meta
 ```
 
 Expected:

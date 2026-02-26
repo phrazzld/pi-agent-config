@@ -1,41 +1,38 @@
-# Capability Slicing (Ousterhout-Style)
+# Capability Slicing (Kernel + Overlay Model)
 
 ## Why this exists
 
-Strategic goal: **reduce ambient complexity per session** while keeping a large capability library.
+Strategic goal: keep session startup simple while allowing rich repo-local behavior.
 
-Instead of loading every extension for every task, run Pi with a narrow capability slice tuned to the job.
+Use a **small set of kernel slices** globally, then layer capabilities via pipelines/agents/bootstrap-generated local overlays.
 
 ## Three-layer model
 
-1. **Baseline (always small)**
-   - Safety and mode control you almost always want.
-   - In this repo: `guardrails`, `profiles`, `handoff`.
+1. **Kernel slice (global, stable)**
+   - Defines the base extension surface for a class of work.
+   - Kernels in this repo: `meta`, `software` (build), `daybook`, `sysadmin` (ops).
 
-2. **Slice (task context)**
-   - A curated extension bundle for a class of work.
-   - Examples: `pi-dev`, `software`, `daybook`, `autopilot`.
+2. **Capability overlay (workflow-specific)**
+   - Issue-to-PR autopilot, deep research posture, etc.
+   - Usually expressed as pipelines/agents/prompts, not extra top-level slices.
 
-3. **Profile (in-slice behavior)**
-   - `fast`, `execute`, `ship`, `ultrathink` (`meta` alias) from `/profile`.
-   - Profile controls thinking/tool posture; slice controls what is even loaded.
+3. **Profile (runtime behavior)**
+   - `fast`, `execute`, `ship`, `ultrathink` (`meta` alias).
+   - Profile controls thinking/tool posture; slice controls what is loaded.
 
 Rule of thumb:
-- **Slice = loaded capabilities**
-- **Profile = behavior inside those capabilities**
+- **Slice = kernel capability envelope**
+- **Capability overlay = workflow composition on top of slice**
+- **Profile = behavior tuning**
 
-## Available slices
+## Available kernel slices
 
 Slice manifests live in `slices/*.json`.
 
-- `baseline`: minimal safety-first default
-- `pi-dev`: meta architecture + maximum visibility + orchestration UI
-- `research`: retrieval + delegation + visibility
-- `delivery`: implementation + governance + orchestration (legacy alias slice; prefer `software`)
-- `software`: generic product engineering slice for most repos
-- `autopilot`: full issue-to-PR stack
-- `daybook`: charisma-first one-on-one journaling slice
-- `sysadmin`: reliability/incident-response slice with watchdog + handoff state
+- `meta`: Pi architecture/config/bootstrap work
+- `software`: default engineering build slice
+- `daybook`: journaling/brainstorming context
+- `sysadmin`: host reliability/incident response
 
 ## How to run
 
@@ -54,10 +51,8 @@ Low-level slice launcher:
 
 ```bash
 pictl slices
-pictl slice baseline
-pictl slice pi-dev --profile meta
+pictl slice meta --profile meta
 pictl slice software --profile execute
-pictl slice autopilot --profile ship
 pictl slice daybook --profile fast
 pictl slice sysadmin --profile execute
 ```
@@ -65,37 +60,25 @@ pictl slice sysadmin --profile execute
 Strict narrow mode (disable discovered skills/prompts/themes too):
 
 ```bash
-pictl slice --strict research --profile meta
+pictl slice --strict meta --profile meta
 ```
 
-## What `pictl slice` does
+## Capability examples (not top-level targets)
 
-`pictl slice` launches Pi with:
-- `--no-extensions` (turns off extension auto-discovery)
-- explicit `-e` extension paths from the selected slice manifest
-- optional `--strict` that also adds:
-  - `--no-skills`
-  - `--no-prompt-templates`
-  - `--no-themes`
+- Autopilot issue-to-PR workflow (build capability):
 
-If the slice has `defaultProfile` and you do not pass `--profile`, it exports `PI_DEFAULT_PROFILE` for that run.
+```bash
+pictl build -- /pipeline autopilot-v1 "ship highest-priority issue"
+```
 
-## Repo-specific slice strategy
+- Research posture inside current repo context:
+  - run in `meta`, `build`, or `daybook`
+  - use web retrieval + subagents + local context
 
-Use this repository as the shared library, then choose slices per repo context:
+## Repo-local strategy
 
-- Working on `pi-agent-config` itself → `pi-dev`
-- Bootstrapping a new repo config → run `meta` in that repo once, then switch
-- Day-to-day product repo work → `build` target (backed by `software` slice) or a domain-specific local slice
-- Deep docs/API research session → `research`
-- Autonomous issue-to-PR run → `autopilot`
-- Journaling/daybook session → `daybook`
-- Reliability triage / host stabilization session → `ops` target (`sysadmin` slice)
+- Bootstrap once in repo context (`pictl meta` + `/bootstrap-repo`)
+- Relaunch `pictl build` for day-to-day work
+- Let bootstrap generate repo-local overlays (`.pi/agents`, `.pi/prompts`, persona/capability specifics)
 
-Keep each repository’s `.pi/settings.json` minimal; rely on slice launchers for runtime composition.
-
-## Next strategic step
-
-- Keep agent roles in `agents/*.md` specialized and small.
-- Keep orchestration config declarative in `agents/teams.yaml` and `agents/pipelines.yaml`.
-- Extend visibility instrumentation with weekly rollups and quality/cost trend summaries.
+This minimizes global complexity while maximizing local usefulness.

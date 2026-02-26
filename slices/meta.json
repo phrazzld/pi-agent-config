@@ -1,5 +1,5 @@
 {
-  "description": "Pi-config development slice for extension/prompt/skill architecture work with maximum primitive visibility.",
+  "description": "Meta-engineering slice for pi-config work, prompt design, and architecture.",
   "defaultProfile": "meta",
   "extensions": [
     "extensions/guardrails/index.ts",

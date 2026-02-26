@@ -4,12 +4,14 @@ Purpose: provide at least one concrete, reusable example for each major Pi primi
 
 ## Slices
 
-- **Meta slice**: `slices/pi-dev.json`
+- **Meta slice (meta.json)**: `slices/meta.json`
   - max visibility + orchestration + subagent + web research
 - **Software slice**: `slices/software.json`
   - generic product engineering default for app repos
 - **Daybook slice**: `slices/daybook.json`
   - charisma-first one-on-one journaling
+- **Ops slice**: `slices/sysadmin.json`
+  - host reliability, watchdog telemetry, and incident workflows
 
 ## Agents
 

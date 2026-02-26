@@ -10,21 +10,25 @@ Start with **what you are trying to do now**, then load the smallest capability 
 
 | Workflow | Trigger question | Target | Slice | Required primitives |
 |---|---|---|---|---|
-| Platform evolution | "Am I changing Pi config/architecture itself?" | `meta` | `pi-dev` | visibility, orchestration, subagent, web retrieval, bootstrap primitive |
+| Platform evolution | "Am I changing Pi config/architecture itself?" | `meta` | `meta` | visibility, orchestration, subagent, web retrieval, bootstrap primitive |
 | Daily product engineering | "Am I implementing features/fixes in an app repo?" | `build` | `software` | planner/worker/reviewer pipelines, guardrails, visibility, retrieval |
-| Autonomous issue-to-PR | "Do I want bounded automation through PR readiness?" | `autopilot` | `autopilot` | checkpoints, governance, orchestration, visibility |
-| Deep investigation | "Am I mostly researching docs/APIs/options?" | `research` | `research` | retrieval, subagent, visibility |
 | Journaling/daybook | "Am I doing reflective one-on-one writing?" | `daybook` | `daybook` | daybook tone layer, selective retrieval, memory search, visibility |
 | Host reliability / incident response | "Am I triaging machine/process instability?" | `ops` | `sysadmin` | watchdog telemetry, crash handoff state, bounded orchestration, forensic tooling |
+
+Capability note:
+- `autopilot` is a build capability pipeline, not a top-level target.
+- `research` is a posture inside `meta`/`build`/`daybook`, not its own target.
 
 ## Usage decision tree
 
 1. Are you modifying `pi-agent-config` or `.pi` architecture? → `pictl meta`
 2. Else, are you triaging host stability or incident forensics? → `pictl ops`
 3. Else, are you journaling/reflection-first? → `pictl daybook`
-4. Else, are you running issue-to-PR automation with checkpoints? → `pictl autopilot`
-5. Else, are you doing primarily research? → `pictl research`
-6. Else (default coding work) → `pictl build`
+4. Else (default coding work) → `pictl build`
+
+Inside `build`, use capabilities as needed:
+- issue-to-PR automation: `/pipeline autopilot-v1 <goal>`
+- deep research posture: use web retrieval + subagents in current repo context
 
 ## Why only these targets
 

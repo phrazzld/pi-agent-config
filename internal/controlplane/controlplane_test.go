@@ -37,8 +37,15 @@ func TestResolveTargetNewAliases(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected ship alias to resolve")
 	}
-	if target.Name != "autopilot" {
-		t.Fatalf("expected autopilot target, got %q", target.Name)
+	if target.Name != "build" {
+		t.Fatalf("expected build target, got %q", target.Name)
+	}
+	target, ok = ResolveTarget("research")
+	if !ok {
+		t.Fatalf("expected research alias to resolve")
+	}
+	if target.Name != "build" {
+		t.Fatalf("expected build target, got %q", target.Name)
 	}
 	target, ok = ResolveTarget("argus")
 	if !ok {
