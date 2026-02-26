@@ -75,6 +75,7 @@ Run example:
 - Extension command: `/bootstrap-repo` (from `extensions/bootstrap`)
 - Tool: `bootstrap_repo`
 - Default mode is opinionated: always multi-lane exploration + ambition pass + synthesis
+- Generated `.pi/bootstrap-report.md` now includes a quality gate scorecard (ambition score + consensus validation).
 - Legacy `--quick` / `--max` toggles are ignored for simplicity
 
 ## Memory primitives

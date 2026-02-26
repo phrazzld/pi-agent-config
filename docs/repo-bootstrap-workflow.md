@@ -43,6 +43,7 @@ No separate plan-only command is required for normal workflow.
 - Workflows support explore -> design -> implement -> review.
 - Prompts/agents are goal-oriented, not brittle procedural scripts.
 - Ambition checkpoint yields one accretive high-leverage addition with explicit validation.
+- Bootstrap report includes quality scorecard (ambition + consensus checks) before apply.
 - Memory workflow is codified (`/memory-ingest`, `/memory-search`, `/memory-context`) rather than ad hoc.
 
 ## Rule of thumb

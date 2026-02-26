@@ -59,7 +59,7 @@ Build a world-class, explicit Pi configuration system with:
 - [ ] Add idempotency key + dedup in orchestration admission path.
 - [ ] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.
 - [ ] Add top-level-only telemetry mode for heavy extensions during delegated depth (`PI_ORCH_DEPTH > 0`).
-- [ ] Tighten bootstrap ambition checkpoint scoring and add consensus-quality validation on generated artifacts.
+- [x] Tighten bootstrap ambition checkpoint scoring and add consensus-quality validation on generated artifacts.
 
 ### Next
 
