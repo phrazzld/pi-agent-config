@@ -8,6 +8,7 @@ import {
   evaluateBootstrapQualityGate,
   formatBootstrapSummary,
   inferRecommendedTarget,
+  normalizePlan,
   parseBootstrapPlan,
   resolveOutputPath,
   scoreAmbitionCheckpoint,
@@ -127,6 +128,48 @@ describe("bootstrap engine", () => {
 
   test("parseBootstrapPlan returns null for invalid payload", () => {
     expect(parseBootstrapPlan("not json")).toBeNull();
+  });
+
+
+  test("parseBootstrapPlan ignores non-string file values", () => {
+    const parsed = parseBootstrapPlan('{"files": {".pi/settings.json": "{}", "docs/raw.json": {"k":1}, "docs/null.txt": null}}');
+    expect(parsed).not.toBeNull();
+    expect(parsed?.files[".pi/settings.json"]).toBe("{}");
+    expect(parsed?.files["docs/raw.json"]).toBeUndefined();
+    expect(parsed?.files["docs/null.txt"]).toBeUndefined();
+  });
+
+  test("normalizePlan backfills required artifacts with concrete string content", () => {
+    const normalized = normalizePlan(
+      {
+        files: {
+          ".pi/settings.json": "{}\n",
+        },
+      },
+      baseFacts(),
+      strongLanes(),
+    );
+
+    expect(typeof normalized.files[".pi/persona.md"]).toBe("string");
+    expect(normalized.files[".pi/persona.md"].length).toBeGreaterThan(0);
+    expect(typeof normalized.files["AGENTS.md"]).toBe("string");
+    expect(normalized.files["AGENTS.md"].length).toBeGreaterThan(0);
+  });
+
+  test("normalizePlan records invalid file content notes and strips non-string artifacts", () => {
+    const normalized = normalizePlan(
+      {
+        files: {
+          ".pi/settings.json": "{}\n",
+          "docs/raw.json": { key: "value" } as unknown as string,
+        } as unknown as Record<string, string>,
+      },
+      baseFacts(),
+      strongLanes(),
+    );
+
+    expect(normalized.files["docs/raw.json"]).toBeUndefined();
+    expect((normalized.notes ?? []).some((note) => note.startsWith("invalid-file-content:docs/raw.json"))).toBe(true);
   });
 
   test("resolveOutputPath keeps writes inside repo root", () => {

@@ -141,7 +141,9 @@ const REQUIRED_FILES = [
   "AGENTS.md",
   "docs/pi-local-workflow.md",
   ".pi/bootstrap-report.md",
-];
+] as const;
+
+type RequiredBootstrapFilePath = (typeof REQUIRED_FILES)[number];
 
 const REQUIRED_CONSENSUS_LANES = [
   "repo-scout",
@@ -216,7 +218,7 @@ export async function bootstrapRepo(
       qualityGate,
     );
 
-    notes = dedupe([...(plan.notes ?? []), ...notes, ...qualityGate.notes]);
+    notes = dedupe([...(normalized.notes ?? []), ...notes, ...qualityGate.notes]);
 
     if (!qualityGate.consensus.pass) {
       notes = dedupe([...notes, "consensus-quality-fallback: synthesized plan failed consensus gate"]);
@@ -226,7 +228,7 @@ export async function bootstrapRepo(
         normalized.files[".pi/bootstrap-report.md"],
         qualityGate,
       );
-      notes = dedupe([...notes, ...qualityGate.notes]);
+      notes = dedupe([...notes, ...(normalized.notes ?? []), ...qualityGate.notes]);
       recommendedTarget = inferRecommendedTarget(facts, lanes);
     } else if (!qualityGate.ambition.pass) {
       notes = dedupe([...notes, `ambition-score-below-threshold:${qualityGate.ambition.total}`]);
@@ -235,7 +237,20 @@ export async function bootstrapRepo(
     progress.setPhase("writing bootstrap artifacts", `${Object.keys(normalized.files).length} files`);
 
     const changes: BootstrapChange[] = [];
+    const writeWarnings: string[] = [];
     for (const [relativePath, content] of Object.entries(normalized.files)) {
+      if (typeof content !== "string") {
+        const valueType = describeValueType(content);
+        changes.push({
+          path: relativePath,
+          action: "skipped",
+          reason: `invalid content type: ${valueType}`,
+        });
+        writeWarnings.push(`invalid-file-content:${relativePath}:${valueType}`);
+        progress.setWriteProgress(changes);
+        continue;
+      }
+
       const absolutePath = resolveOutputPath(repoRoot, relativePath);
       if (!absolutePath) {
         changes.push({
@@ -257,6 +272,8 @@ export async function bootstrapRepo(
       await writePlannedFile(absolutePath, content, allowOverwrite, changes, overwriteReason);
       progress.setWriteProgress(changes);
     }
+
+    notes = dedupe([...notes, ...writeWarnings]);
 
     const elapsedMs = Date.now() - startedAtMs;
     const result = {
@@ -600,9 +617,9 @@ export function scoreAmbitionCheckpoint(report: string, lanes: LaneResult[]): Am
 
 export function evaluateConsensusQuality(plan: BootstrapPlan, lanes: LaneResult[]): ConsensusQualityValidation {
   const checks: ConsensusQualityCheck[] = [];
-  const files = plan.files ?? {};
+  const files = (plan.files ?? {}) as Record<string, unknown>;
 
-  const missingRequired = REQUIRED_FILES.filter((filePath) => !files[filePath] || !files[filePath].trim());
+  const missingRequired = REQUIRED_FILES.filter((filePath) => !isNonEmptyString(files[filePath]));
   checks.push(
     qualityCheck(
       "required-artifacts",
@@ -617,8 +634,8 @@ export function evaluateConsensusQuality(plan: BootstrapPlan, lanes: LaneResult[
   );
 
   const declaredAgents = collectDeclaredAgentNames(files);
-  const teamAgentRefs = extractTeamAgentReferences(files[".pi/agents/teams.yaml"] ?? "");
-  const pipelineAgentRefs = extractPipelineAgentReferences(files[".pi/agents/pipelines.yaml"] ?? "");
+  const teamAgentRefs = extractTeamAgentReferences(asString(files[".pi/agents/teams.yaml"]));
+  const pipelineAgentRefs = extractPipelineAgentReferences(asString(files[".pi/agents/pipelines.yaml"]));
 
   const unknownTeamAgents = teamAgentRefs.filter((agent) => !declaredAgents.has(agent));
   checks.push(
@@ -681,7 +698,7 @@ export function evaluateConsensusQuality(plan: BootstrapPlan, lanes: LaneResult[
     ),
   );
 
-  const report = files[".pi/bootstrap-report.md"] ?? "";
+  const report = asString(files[".pi/bootstrap-report.md"]);
   const additionSection = extractMarkdownSection(report, "Single Highest-Leverage Addition");
   const hasStructuredAddition = [
     extractLabeledBullet(additionSection, "Idea"),
@@ -709,7 +726,7 @@ export function evaluateConsensusQuality(plan: BootstrapPlan, lanes: LaneResult[
     ".pi/prompts/deliver.md",
     ".pi/prompts/review.md",
   ];
-  const weakPrompts = promptFiles.filter((filePath) => (files[filePath] ?? "").trim().length < 80);
+  const weakPrompts = promptFiles.filter((filePath) => asString(files[filePath]).trim().length < 80);
 
   checks.push(
     qualityCheck(
@@ -762,7 +779,7 @@ function qualityCheck(
   };
 }
 
-function collectDeclaredAgentNames(files: Record<string, string>): Set<string> {
+function collectDeclaredAgentNames(files: Record<string, unknown>): Set<string> {
   const names = new Set<string>();
 
   for (const filePath of Object.keys(files)) {
@@ -939,12 +956,16 @@ function isSubstantiveValue(value: string, minLength: number): boolean {
   return alphaNumCount >= minLength;
 }
 
-function normalizePlan(plan: BootstrapPlan, facts: RepoFacts, lanes: LaneResult[]): BootstrapPlan {
-  const files = { ...plan.files };
+export function normalizePlan(plan: BootstrapPlan, facts: RepoFacts, lanes: LaneResult[]): BootstrapPlan {
+  const sanitized = sanitizePlanFiles(plan.files);
+  const files: Record<string, string> = { ...sanitized.files };
 
-  const fallback = fallbackPlan(facts, lanes).files;
+  const fallback = buildRequiredFallbackFiles(facts, lanes, [
+    "Auto-generated report because synthesized output omitted required artifacts.",
+  ]);
+
   for (const required of REQUIRED_FILES) {
-    if (!files[required] || !files[required].trim()) {
+    if (!isNonEmptyString(files[required])) {
       files[required] = fallback[required];
     }
   }
@@ -996,37 +1017,95 @@ function normalizePlan(plan: BootstrapPlan, facts: RepoFacts, lanes: LaneResult[
     files[".pi/settings.json"] = fallback[".pi/settings.json"];
   }
 
+  const notes = dedupe([...(plan.notes ?? []), ...sanitized.notes]);
+
   return {
     files,
-    notes: plan.notes,
+    notes: notes.length > 0 ? notes : undefined,
     recommendedTarget: plan.recommendedTarget,
   };
 }
 
-function fallbackPlan(facts: RepoFacts, lanes: LaneResult[]): BootstrapPlan {
-  const report = buildBootstrapReport(facts, lanes, [
-    "Fallback plan used because synthesis was unavailable or invalid.",
-  ]);
-
+function buildRequiredFallbackFiles(
+  facts: RepoFacts,
+  lanes: LaneResult[],
+  reportNotes: string[],
+): Record<RequiredBootstrapFilePath, string> {
   return {
-    files: {
-      ".pi/settings.json": `${JSON.stringify(buildSettingsObject(facts), null, 2)}\n`,
-      ".pi/agents/planner.md": plannerTemplate(facts),
-      ".pi/agents/worker.md": workerTemplate(facts),
-      ".pi/agents/reviewer.md": reviewerTemplate(facts),
-      ".pi/agents/teams.yaml": teamsTemplate(facts),
-      ".pi/agents/pipelines.yaml": pipelinesTemplate(facts),
-      ".pi/prompts/discover.md": discoverPromptTemplate(facts),
-      ".pi/prompts/design.md": designPromptTemplate(facts),
-      ".pi/prompts/deliver.md": deliverPromptTemplate(facts),
-      ".pi/prompts/review.md": reviewPromptTemplate(facts),
-      "AGENTS.md": agentsTemplate(facts),
-      "docs/pi-local-workflow.md": localWorkflowTemplate(facts),
-      ".pi/bootstrap-report.md": report,
-    },
+    ".pi/settings.json": `${JSON.stringify(buildSettingsObject(facts), null, 2)}\n`,
+    ".pi/persona.md": personaTemplate(facts),
+    ".pi/agents/planner.md": plannerTemplate(facts),
+    ".pi/agents/worker.md": workerTemplate(facts),
+    ".pi/agents/reviewer.md": reviewerTemplate(facts),
+    ".pi/agents/teams.yaml": teamsTemplate(facts),
+    ".pi/agents/pipelines.yaml": pipelinesTemplate(facts),
+    ".pi/prompts/discover.md": discoverPromptTemplate(facts),
+    ".pi/prompts/design.md": designPromptTemplate(facts),
+    ".pi/prompts/deliver.md": deliverPromptTemplate(facts),
+    ".pi/prompts/review.md": reviewPromptTemplate(facts),
+    "AGENTS.md": agentsTemplate(facts),
+    "docs/pi-local-workflow.md": localWorkflowTemplate(facts),
+    ".pi/bootstrap-report.md": buildBootstrapReport(facts, lanes, reportNotes),
+  };
+}
+
+function fallbackPlan(facts: RepoFacts, lanes: LaneResult[]): BootstrapPlan {
+  return {
+    files: buildRequiredFallbackFiles(facts, lanes, [
+      "Fallback plan used because synthesis was unavailable or invalid.",
+    ]),
     recommendedTarget: inferRecommendedTarget(facts, lanes),
     notes: ["fallback-plan"],
   };
+}
+
+function sanitizePlanFiles(filesValue: unknown): { files: Record<string, string>; notes: string[] } {
+  if (!filesValue || typeof filesValue !== "object") {
+    return {
+      files: {},
+      notes: ["invalid-files-object"],
+    };
+  }
+
+  const files: Record<string, string> = {};
+  const notes: string[] = [];
+
+  for (const [relativePath, content] of Object.entries(filesValue as Record<string, unknown>)) {
+    const normalizedPath = relativePath.trim();
+    if (!normalizedPath) {
+      continue;
+    }
+
+    if (typeof content === "string") {
+      files[normalizedPath] = content;
+      continue;
+    }
+
+    notes.push(`invalid-file-content:${normalizedPath}:${describeValueType(content)}`);
+  }
+
+  return {
+    files,
+    notes: dedupe(notes),
+  };
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function describeValueType(value: unknown): string {
+  if (value === null) {
+    return "null";
+  }
+  if (Array.isArray(value)) {
+    return "array";
+  }
+  return typeof value;
 }
 
 function buildSettingsObject(_facts: RepoFacts): Record<string, unknown> {
@@ -1607,11 +1686,27 @@ export function parseBootstrapPlan(raw: string): BootstrapPlan | null {
 
   for (const candidate of candidates) {
     try {
-      const parsed = JSON.parse(candidate) as BootstrapPlan;
-      if (!parsed || typeof parsed !== "object" || typeof parsed.files !== "object" || !parsed.files) {
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object" || !parsed.files || typeof parsed.files !== "object") {
         continue;
       }
-      return parsed;
+
+      const sanitized = sanitizePlanFiles(parsed.files);
+      const notes = Array.isArray(parsed.notes)
+        ? parsed.notes.filter((note): note is string => typeof note === "string" && note.trim().length > 0)
+        : [];
+      const recommendedTarget =
+        typeof parsed.recommendedTarget === "string" && parsed.recommendedTarget.trim().length > 0
+          ? parsed.recommendedTarget.trim()
+          : undefined;
+
+      const combinedNotes = dedupe([...notes, ...sanitized.notes]);
+
+      return {
+        files: sanitized.files,
+        notes: combinedNotes.length > 0 ? combinedNotes : undefined,
+        recommendedTarget,
+      };
     } catch {
       continue;
     }
