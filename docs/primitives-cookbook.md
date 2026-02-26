@@ -32,6 +32,7 @@ Run example:
   - `plan-build-review`
   - `software-delivery-v1`
   - `meta-council-v1`
+  - `meta-refactor-v1`
   - `autopilot-v1`
 
 Run example:
@@ -93,3 +94,11 @@ Run example:
   - `local` = repo-scoped memory
   - `global` = cross-repo memory
   - `both` = local-first + global fallback
+
+## Architecture + config visibility
+
+- Topology docs: `docs/architecture/runtime-topology.md`
+- Config precedence docs: `docs/architecture/config-resolution.md`
+- Generated runtime inventory: `docs/architecture/runtime-inventory.md`
+- Command: `/visibility config` for active config snapshot
+- Regenerate inventory: `./scripts/gen-runtime-inventory.sh`

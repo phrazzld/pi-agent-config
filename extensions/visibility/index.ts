@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -119,7 +121,7 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("visibility", {
-    description: "Inspect or toggle primitive visibility UI. Usage: /visibility [on|off]",
+    description: "Inspect visibility state. Usage: /visibility [on|off|config|active]",
     handler: async (args, ctx) => {
       const mode = args.trim().toLowerCase();
       if (mode === "on") {
@@ -133,6 +135,12 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
         liveWidgetEnabled = false;
         refreshUi(ctx);
         ctx.ui.notify("Visibility widget disabled.", "info");
+        return;
+      }
+
+      if (mode === "config" || mode === "active") {
+        const snapshot = await buildConfigSnapshot(pi, ctx, inventory);
+        ctx.ui.notify(snapshot, "info");
         return;
       }
 
@@ -326,6 +334,100 @@ function buildRunSummary(state: UsageStats, durationMs: number, model: string): 
     `slash=${runSlash}`,
     `session-tools=${formatTopEntries(state.tools, 8) || "none"}`,
   ].join(" | ");
+}
+
+async function buildConfigSnapshot(pi: ExtensionAPI, ctx: ExtensionContext, inventory: RuntimeInventory): Promise<string> {
+  const repoRoot = await detectRepoRoot(pi, ctx.cwd);
+  const configDir = getConfigDir();
+  const globalSettingsPath = path.join(configDir, "settings.json");
+  const localSettingsPath = path.join(repoRoot, ".pi", "settings.json");
+
+  const [globalSettings, localSettings] = await Promise.all([
+    readSettingsFileSummary(globalSettingsPath),
+    readSettingsFileSummary(localSettingsPath),
+  ]);
+
+  const activeTools = pi.getActiveTools().map((tool) => String(tool)).sort();
+  const allTools = pi.getAllTools().map((tool) => tool.name).sort();
+  const profileFlag = resolveActiveProfile(pi);
+
+  const localAgentsDir = path.join(repoRoot, ".pi", "agents");
+  const localPromptsDir = path.join(repoRoot, ".pi", "prompts");
+  const localRepoAgents = path.join(repoRoot, "AGENTS.md");
+
+  return [
+    "runtime config snapshot",
+    `cwd: ${ctx.cwd}`,
+    `repo root: ${repoRoot}`,
+    `active profile: ${profileFlag}`,
+    `active tools: ${activeTools.length}/${allTools.length}`,
+    `runtime inventory: ext=${inventory.extensionCommands.length} prompt=${inventory.promptCommands.length} skill=${inventory.skillCommands.length} tool=${inventory.tools.length}`,
+    "",
+    "config precedence (highest -> lowest):",
+    "1) repo-local .pi/settings.json",
+    "2) global ~/.pi/agent/settings.json",
+    "3) runtime defaults + loaded extensions",
+    "",
+    `global settings: ${globalSettings}`,
+    `local settings: ${localSettings}`,
+    `local AGENTS.md: ${existsSync(localRepoAgents) ? "present" : "absent"}`,
+    `local .pi/agents: ${existsSync(localAgentsDir) ? "present" : "absent"}`,
+    `local .pi/prompts: ${existsSync(localPromptsDir) ? "present" : "absent"}`,
+  ].join("\n");
+}
+
+async function readSettingsFileSummary(settingsPath: string): Promise<string> {
+  if (!existsSync(settingsPath)) {
+    return `absent (${settingsPath})`;
+  }
+
+  try {
+    const raw = await readFile(settingsPath, "utf8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const extensions = countArray(parsed.extensions);
+    const skills = countArray(parsed.skills);
+    const prompts = countArray(parsed.prompts);
+    const themes = countArray(parsed.themes);
+
+    return `present (${settingsPath}) extensions=${extensions} skills=${skills} prompts=${prompts} themes=${themes}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `present but invalid JSON (${settingsPath}): ${message}`;
+  }
+}
+
+function countArray(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function resolveActiveProfile(pi: ExtensionAPI): string {
+  try {
+    const flag = pi.getFlag("profile");
+    if (flag) {
+      return String(flag);
+    }
+  } catch {
+    // ignore missing flag provider
+  }
+
+  const envProfile = (process.env.PI_DEFAULT_PROFILE ?? "").trim();
+  return envProfile || "(default)";
+}
+
+async function detectRepoRoot(pi: ExtensionAPI, cwd: string): Promise<string> {
+  const result = await pi.exec("git", ["rev-parse", "--show-toplevel"], {
+    cwd,
+    timeout: 15_000,
+  });
+
+  if (result.code === 0) {
+    const root = result.stdout.trim();
+    if (root) {
+      return root;
+    }
+  }
+
+  return cwd;
 }
 
 function buildUnifiedFooterLine(

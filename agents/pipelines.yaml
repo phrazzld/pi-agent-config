@@ -106,3 +106,21 @@ groom-ambition-v1:
       prompt: "Pressure-test the candidates for risk, complexity bloat, and reversibility:\n\n$INPUT"
     - agent: groom-synthesizer
       prompt: "Select the single best candidate (or reject all) and provide 72h validation, kill criteria, and rollback plan:\n\n$INPUT"
+
+meta-refactor-v1:
+  description: "Structured complexity-paydown loop: inventory -> hotspot selection -> refactor -> verification"
+  checkpoints:
+    - after-inventory
+    - before-refactor
+    - before-merge
+  steps:
+    - agent: scout
+      prompt: "Inventory current runtime architecture and identify the single highest-leverage simplification hotspot for:\n\n$INPUT"
+    - agent: planner
+      prompt: "Design a minimal, root-cause refactor plan with explicit tests and verification for:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Critique this refactor plan for hidden coupling, migration risk, and missing regression coverage:\n\n$INPUT"
+    - agent: worker
+      prompt: "Execute the approved refactor with focused scope and regression tests:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Run merge-readiness review for correctness, reliability, and complexity reduction claims:\n\n$INPUT"

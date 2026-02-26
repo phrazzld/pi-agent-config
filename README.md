@@ -74,7 +74,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `/pipelines`, `/pipeline`
 - `/orchestration`, `/orchestration-clear`
 - `/orchestration-policy`, `/orchestration-circuit`
-- `/visibility`, `/visibility-reset`
+- `/visibility`, `/visibility-reset` (use `/visibility config` for active config resolution snapshot)
 - `/handoff`
 - `/ops-status`, `/ops-policy`, `/ops-tail`
 - `/daybook-tone`, `/daybook-kickoff`
@@ -181,6 +181,10 @@ See:
 - `docs/delegated-run-health-model-v1.md`
 - `docs/adr/ADR-0001-orchestration-admission-control.md`
 - `docs/workflow-first-slice-design.md`
+- `docs/architecture/runtime-topology.md`
+- `docs/architecture/config-resolution.md`
+- `docs/architecture/runtime-inventory.md` (generated)
+- `docs/refactor-loop.md`
 - `docs/autopilot-pipeline.md`
 - `docs/autopilot-flywheel.md`
 - `docs/prospecting-flywheel.md`
@@ -262,6 +266,10 @@ Optional delegated-run health knobs (stall-aware polling):
 ## Extension Tests (lightweight harness)
 ```bash
 ./scripts/test-extensions.sh
+```
+
+```bash
+./scripts/gen-runtime-inventory.sh
 ```
 
 See `docs/pi-extension-testing.md` for testing guidelines.

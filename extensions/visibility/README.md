@@ -16,7 +16,9 @@ Maximum-visibility runtime instrumentation for onboarding and workflow tuning.
 
 ## Commands
 
-- `/visibility` — print current snapshot
+- `/visibility` — print current primitive snapshot
+- `/visibility on|off` — toggle live widget
+- `/visibility config` — print active config resolution snapshot
 - `/visibility-reset` — reset session counters
 
 ## Notes
