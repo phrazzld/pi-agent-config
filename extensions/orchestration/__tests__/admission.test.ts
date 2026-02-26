@@ -127,6 +127,60 @@ describe("orchestration admission controller", () => {
     }
   });
 
+
+  test("dedupes concurrent runs via idempotency key", async () => {
+    const h = createHarness({ maxRuns: 1 });
+    try {
+      const runA = await h.controller.preflightRun({
+        runId: "run-a",
+        idempotencyKey: "team:core:same-goal",
+        kind: "team_run",
+        depth: 0,
+        requestedParallelism: 1,
+      });
+      expect(runA.ok).toBe(true);
+      if (!runA.ok) {
+        return;
+      }
+
+      const runB = await h.controller.preflightRun({
+        runId: "run-b",
+        idempotencyKey: "team:core:same-goal",
+        kind: "team_run",
+        depth: 0,
+        requestedParallelism: 1,
+      });
+      expect(runB.ok).toBe(true);
+      if (!runB.ok) {
+        return;
+      }
+
+      expect(runB.grant.runId).toBe(runA.grant.runId);
+      expect(runB.grant.leaseId).toBe(runA.grant.leaseId);
+      expect(runB.grant.idempotencyKey).toBe("team:core:same-goal");
+
+      const status = await h.controller.getStatus();
+      expect(status.activeRuns).toBe(1);
+
+      await h.controller.endRun(runA.grant, "ok");
+
+      const runC = await h.controller.preflightRun({
+        runId: "run-c",
+        idempotencyKey: "team:core:same-goal",
+        kind: "team_run",
+        depth: 0,
+        requestedParallelism: 1,
+      });
+      expect(runC.ok).toBe(true);
+      if (runC.ok) {
+        expect(runC.grant.runId).toBe("run-c");
+        await h.controller.endRun(runC.grant, "ok");
+      }
+    } finally {
+      h.cleanup();
+    }
+  });
+
   test("opens breaker on critical pressure and recovers after cooldown", async () => {
     const pressureRef = {
       severity: "critical" as "ok" | "warn" | "critical",

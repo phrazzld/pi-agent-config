@@ -130,7 +130,7 @@ Governor defaults were reactive (`warn`) and slow (`75s`), so they observed rath
 |---|---|---|---|---|
 | P0 | Add orchestration admission controller for `team_run`, `pipeline_run`, `subagent` (global token cap + fail-closed circuit breaker on critical pressure) | orchestration extension | 2026-03-04 | implemented (pending soak) |
 | P0 | Add orchestration recursion-depth guard (`PI_ORCH_DEPTH`) and reject above max depth | orchestration extension | 2026-03-04 | implemented |
-| P0 | Add idempotency key + dedup for repeated identical orchestration requests | orchestration extension | 2026-03-07 | planned |
+| P0 | Add idempotency key + dedup for repeated identical orchestration requests | orchestration extension | 2026-03-07 | implemented |
 | P1 | Tighten governor defaults for orchestration slices (`enforce` for ops/meta) and shorter check interval | orchestration + profiles | 2026-03-10 | planned |
 | P1 | Add stress harness: synthetic runaway test asserting process-count ceiling and fast fail-close behavior | scripts/forensics + CI | 2026-03-12 | implemented (unit harness) |
 | P1 | Add NDJSON log rotation and bounded retention for watchdog/handoff/admission telemetry | runtime extensions + sysadmin scripts | 2026-03-12 | implemented |
@@ -156,7 +156,6 @@ Governor defaults were reactive (`warn`) and slow (`75s`), so they observed rath
 ## Residual risk
 
 - Admission control is now on-path, but needs soak validation to tune false positives and rejection rates under mixed workloads.
-- Idempotency/dedup for repeated identical orchestration requests is still pending.
 - Governor defaults are still conservative (`warn` in many flows); runaway detection latency can remain higher than desired.
 - Heavy non-Pi workloads (virtualization, browsers, local builds/tests) still reduce memory headroom.
 

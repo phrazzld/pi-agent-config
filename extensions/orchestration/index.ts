@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -652,8 +653,18 @@ async function runTeam(
   const limit = Math.max(1, Math.min(8, options.concurrency));
   const runId = createRunId("team_run", teamName);
   const depth = currentOrchestrationDepth();
+  const idempotencyKey = createRunIdempotencyKey("team_run", {
+    cwd: ctx.cwd,
+    target: teamName,
+    goal,
+    depth,
+    agentScope: options.agentScope,
+    requestedParallelism: limit,
+    governor: options.governor,
+  });
   const preflight = await options.admission.preflightRun({
     runId,
+    idempotencyKey,
     kind: "team_run",
     depth,
     requestedParallelism: limit,
@@ -748,8 +759,18 @@ async function runPipeline(
 
   const runId = createRunId("pipeline_run", pipelineName);
   const depth = currentOrchestrationDepth();
+  const idempotencyKey = createRunIdempotencyKey("pipeline_run", {
+    cwd: ctx.cwd,
+    target: pipelineName,
+    goal,
+    depth,
+    agentScope: options.agentScope,
+    requestedParallelism: 1,
+    governor: options.governor,
+  });
   const preflight = await options.admission.preflightRun({
     runId,
+    idempotencyKey,
     kind: "pipeline_run",
     depth,
     requestedParallelism: 1,
@@ -1075,6 +1096,67 @@ function formatPipelines(pipelines: PipelineMap): string[] {
 function createRunId(kind: "team_run" | "pipeline_run" | "subagent", target: string): string {
   const safe = target.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 40);
   return `${kind}:${safe}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function createRunIdempotencyKey(
+  kind: "team_run" | "pipeline_run" | "subagent",
+  input: {
+    cwd: string;
+    target: string;
+    goal: string;
+    depth: number;
+    agentScope?: AgentScope;
+    requestedParallelism: number;
+    governor?: GovernorOverrides;
+  },
+): string {
+  const fingerprint = {
+    kind,
+    cwd: path.resolve(input.cwd),
+    target: input.target.trim().toLowerCase(),
+    goal: normalizeGoalForIdempotency(input.goal),
+    depth: Math.max(0, Math.floor(input.depth)),
+    agentScope: input.agentScope ?? "both",
+    requestedParallelism: Math.max(1, Math.floor(input.requestedParallelism)),
+    governor: normalizeGovernorForIdempotency(input.governor),
+  };
+
+  const digest = createHash("sha1")
+    .update(JSON.stringify(fingerprint))
+    .digest("hex")
+    .slice(0, 20);
+
+  const safeTarget = input.target.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 24) || "target";
+  return `${kind}:${safeTarget}:${digest}`;
+}
+
+function normalizeGoalForIdempotency(goal: string): string {
+  return goal
+    .trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 500);
+}
+
+function normalizeGovernorForIdempotency(governor: GovernorOverrides | undefined): Record<string, unknown> {
+  if (!governor) {
+    return {};
+  }
+
+  const normalized: Record<string, unknown> = {};
+  if (governor.mode) {
+    normalized.mode = governor.mode;
+  }
+  if (typeof governor.maxCostUsd === "number" && Number.isFinite(governor.maxCostUsd)) {
+    normalized.maxCostUsd = governor.maxCostUsd;
+  }
+  if (typeof governor.maxTokens === "number" && Number.isFinite(governor.maxTokens)) {
+    normalized.maxTokens = Math.floor(governor.maxTokens);
+  }
+  if (typeof governor.fuseSeconds === "number" && Number.isFinite(governor.fuseSeconds)) {
+    normalized.fuseSeconds = Math.floor(governor.fuseSeconds);
+  }
+
+  return normalized;
 }
 
 function formatGuardBlockReason(rejection: AdmissionRejection): string {

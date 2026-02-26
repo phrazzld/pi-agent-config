@@ -138,6 +138,7 @@ Core controls:
 - circuit opens on:
   - critical host pressure from `ops-watchdog`
   - excessive tool call/result mismatch gap (auto-resets after quiet period)
+- idempotency dedup: repeated identical orchestration requests re-use existing in-flight run lease instead of spawning duplicate fan-out
 
 Operational commands:
 - `/orchestration-policy`

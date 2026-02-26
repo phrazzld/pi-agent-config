@@ -43,6 +43,7 @@ export interface PressureSnapshot {
 export interface AdmissionRunGrant {
   leaseId: string;
   runId: string;
+  idempotencyKey?: string;
   kind: "team_run" | "pipeline_run" | "subagent";
   depth: number;
   requestedParallelism: number;
@@ -95,6 +96,7 @@ interface AdmissionCounters {
 interface RunLease {
   leaseId: string;
   runId: string;
+  idempotencyKey?: string;
   kind: "team_run" | "pipeline_run" | "subagent";
   depth: number;
   requestedParallelism: number;
@@ -287,6 +289,28 @@ function sanitizeParallelism(value: number): number {
   return Math.max(1, Math.floor(value));
 }
 
+function normalizeIdempotencyKey(value: string | undefined): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._:-]/g, "_")
+    .replace(/_+/g, "_");
+
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.slice(0, 180);
+}
+
+function findRunLeaseByIdempotencyKey(state: AdmissionState, idempotencyKey: string): RunLease | undefined {
+  if (!idempotencyKey) {
+    return undefined;
+  }
+
+  return Object.values(state.runs).find((lease) => lease.idempotencyKey === idempotencyKey);
+}
+
 export function currentOrchestrationDepth(): number {
   const raw = Number(process.env.PI_ORCH_DEPTH ?? 0);
   if (!Number.isFinite(raw) || raw < 0) {
@@ -353,6 +377,7 @@ export class OrchestrationAdmissionController {
 
   async preflightRun(input: {
     runId: string;
+    idempotencyKey?: string;
     kind: "team_run" | "pipeline_run" | "subagent";
     depth: number;
     requestedParallelism: number;
@@ -360,6 +385,7 @@ export class OrchestrationAdmissionController {
     const now = this.deps.now();
     const pressure = await this.safePressureSnapshot();
     const requestedParallelism = sanitizeParallelism(input.requestedParallelism);
+    const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
 
     try {
       const decision = await this.withStateLock(async (state, lockedNow) => {
@@ -369,6 +395,21 @@ export class OrchestrationAdmissionController {
         const immediate = this.evaluateImmediateGuards(state, lockedNow, input.depth, pressure);
         if (immediate) {
           return immediate;
+        }
+
+        const existing = state.runs[input.runId] ?? findRunLeaseByIdempotencyKey(state, idempotencyKey);
+        if (existing) {
+          existing.expiresAt = lockedNow + this.policy.runLeaseTtlMs;
+          const grant: AdmissionRunGrant = {
+            leaseId: existing.leaseId,
+            runId: existing.runId,
+            idempotencyKey: existing.idempotencyKey,
+            kind: existing.kind,
+            depth: existing.depth,
+            requestedParallelism: existing.requestedParallelism,
+            grantedAt: lockedNow,
+          };
+          return { ok: true, grant } as const;
         }
 
         if (Object.keys(state.runs).length >= this.policy.maxInFlightRuns) {
@@ -394,24 +435,11 @@ export class OrchestrationAdmissionController {
           );
         }
 
-        const existing = state.runs[input.runId];
-        if (existing) {
-          existing.expiresAt = lockedNow + this.policy.runLeaseTtlMs;
-          const grant: AdmissionRunGrant = {
-            leaseId: existing.leaseId,
-            runId: existing.runId,
-            kind: existing.kind,
-            depth: existing.depth,
-            requestedParallelism: existing.requestedParallelism,
-            grantedAt: lockedNow,
-          };
-          return { ok: true, grant } as const;
-        }
-
         const leaseId = `run_${input.kind}_${lockedNow}_${this.deps.randomId()}`;
         state.runs[input.runId] = {
           leaseId,
           runId: input.runId,
+          idempotencyKey: idempotencyKey || undefined,
           kind: input.kind,
           depth: input.depth,
           requestedParallelism,
@@ -422,6 +450,7 @@ export class OrchestrationAdmissionController {
         const grant: AdmissionRunGrant = {
           leaseId,
           runId: input.runId,
+          idempotencyKey: idempotencyKey || undefined,
           kind: input.kind,
           depth: input.depth,
           requestedParallelism,
@@ -436,6 +465,7 @@ export class OrchestrationAdmissionController {
           kind: "run_denied",
           gateKind: input.kind,
           runId: input.runId,
+          idempotencyKey: idempotencyKey || undefined,
           depth: input.depth,
           requestedParallelism,
           code: decision.code,
@@ -449,7 +479,10 @@ export class OrchestrationAdmissionController {
         ts: now,
         kind: "run_allowed",
         gateKind: input.kind,
-        runId: input.runId,
+        runId: decision.grant.runId,
+        requestedRunId: input.runId,
+        idempotencyKey: decision.grant.idempotencyKey,
+        deduped: decision.grant.runId !== input.runId,
         depth: input.depth,
         requestedParallelism,
         leaseId: decision.grant.leaseId,
@@ -462,6 +495,7 @@ export class OrchestrationAdmissionController {
         kind: "state_error",
         gateKind: input.kind,
         runId: input.runId,
+        idempotencyKey: idempotencyKey || undefined,
         code: "STATE_ERROR",
         reason: message,
       });
@@ -483,6 +517,7 @@ export class OrchestrationAdmissionController {
         kind: "run_end",
         gateKind: grant.kind,
         runId: grant.runId,
+        idempotencyKey: grant.idempotencyKey,
         leaseId: grant.leaseId,
         status,
       });

@@ -41,6 +41,11 @@ These enable LLM-driven orchestration while preserving dashboard visibility.
 All orchestration tool paths are now protected by admission control and can fail closed
 with structured error codes when limits are exceeded.
 
+Idempotency behavior:
+- repeated identical `team_run` / `pipeline_run` requests now compute an idempotency key
+- if a matching run is already in-flight, admission deduplicates to the existing run lease instead of spawning another fan-out
+- dedup outcomes are logged in admission telemetry (`deduped: true`)
+
 ## Adaptive governor (v1)
 
 Execution uses progress-aware checks instead of short fixed runtime caps.
