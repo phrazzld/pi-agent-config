@@ -14,15 +14,19 @@ import {
   discoverAgents,
   formatAgentList,
 } from "./agents";
+import {
+  DelegatedRunHealthMonitor,
+  resolveDelegatedHealthPolicy,
+  type DelegatedHealthSummary,
+} from "../shared/delegated-health";
+import {
+  appendSubagentExecutionContract,
+  resolveGuardrailBudget,
+  type GuardrailBudget,
+} from "./guardrails";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_PARALLEL_CONCURRENCY = 4;
-const DEFAULT_MAX_TURNS = 80;
-const DEFAULT_MAX_RUNTIME_SECONDS = 600;
-const MIN_MAX_TURNS = 5;
-const MAX_MAX_TURNS = 500;
-const MIN_MAX_RUNTIME_SECONDS = 15;
-const MAX_MAX_RUNTIME_SECONDS = 7_200;
 
 interface UsageStats {
   input: number;
@@ -55,11 +59,7 @@ interface SingleResult {
   lastAction?: string;
   maxTurns?: number;
   maxRuntimeSeconds?: number;
-}
-
-interface GuardrailBudget {
-  maxTurns: number;
-  maxRuntimeSeconds: number;
+  health?: DelegatedHealthSummary;
 }
 
 interface SubagentDetails {
@@ -197,7 +197,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           const step = params.chain[i];
           const task = step.task.replace(/\{previous\}/g, previous);
 
-          const result = await runSingleAgent(pi, {
+          const result = await runSingleAgent({
             defaultCwd: ctx.cwd,
             agents,
             agentName: step.agent,
@@ -279,7 +279,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         };
 
         const results = await mapWithConcurrencyLimit(params.tasks, MAX_PARALLEL_CONCURRENCY, async (task, index) => {
-          const result = await runSingleAgent(pi, {
+          const result = await runSingleAgent({
             defaultCwd: ctx.cwd,
             agents,
             agentName: task.agent,
@@ -321,7 +321,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       }
 
       if (hasSingle && params.agent && params.task) {
-        const result = await runSingleAgent(pi, {
+        const result = await runSingleAgent({
           defaultCwd: ctx.cwd,
           agents,
           agentName: params.agent,
@@ -417,6 +417,16 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           budgetParts.push(`runtime ${elapsedSeconds}s`);
         }
         out += `\n${theme.fg("muted", budgetParts.join(" · "))}`;
+
+        if (entry.health) {
+          const healthState =
+            entry.health.classification === "healthy"
+              ? theme.fg("success", entry.health.classification)
+              : entry.health.classification === "slow"
+                ? theme.fg("warning", entry.health.classification)
+                : theme.fg("error", entry.health.classification);
+          out += `\n${theme.fg("dim", `health: ${healthState} no-progress=${entry.health.noProgressSeconds}s stalls=${entry.health.stallEpisodes}`)}`;
+        }
 
         if (entry.model || entry.configuredModel) {
           out += `\n${theme.fg("dim", `model: ${entry.model ?? entry.configuredModel}`)}`;
@@ -547,7 +557,7 @@ interface RunSingleAgentOptions {
   onUpdate?: (result: SingleResult) => void;
 }
 
-async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions): Promise<SingleResult> {
+async function runSingleAgent(options: RunSingleAgentOptions): Promise<SingleResult> {
   const agent = options.agents.find((candidate) => candidate.name === options.agentName);
   if (!agent) {
     return {
@@ -597,7 +607,14 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
       maxRuntimeSeconds: guardrailBudget.maxRuntimeSeconds,
     };
 
+    const healthPolicy = resolveDelegatedHealthPolicy(process.env);
+    const health = new DelegatedRunHealthMonitor(
+      `subagent:${agent.name}:${Date.now()}`,
+      healthPolicy,
+    );
+
     let aborted = false;
+    let abortedByHealth = false;
     let abortReason: string | null = null;
 
     const exitCode = await new Promise<number>((resolve) => {
@@ -607,11 +624,15 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
         stdio: ["ignore", "pipe", "pipe"],
       });
 
+      health.noteEvent("spawn");
+
       let childClosed = false;
       let stdoutBuffer = "";
+      let observedToolExecutionEvents = false;
       let forceKillTimer: NodeJS.Timeout | null = null;
       let runtimeTimer: NodeJS.Timeout | null = null;
       let heartbeatTimer: NodeJS.Timeout | null = null;
+      let healthTimer: NodeJS.Timeout | null = null;
 
       const updateProgress = () => {
         result.lastUpdateAtMs = Date.now();
@@ -619,13 +640,43 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
         options.onUpdate?.(result);
       };
 
-      const abortChild = (reason: string) => {
+      const stopForceKillTimer = () => {
+        if (forceKillTimer) {
+          clearTimeout(forceKillTimer);
+          forceKillTimer = null;
+        }
+      };
+
+      const stopRuntimeTimer = () => {
+        if (runtimeTimer) {
+          clearTimeout(runtimeTimer);
+          runtimeTimer = null;
+        }
+      };
+
+      const stopHeartbeatTimer = () => {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
+      };
+
+      const stopHealthTimer = () => {
+        if (healthTimer) {
+          clearInterval(healthTimer);
+          healthTimer = null;
+        }
+      };
+
+      const abortChild = (origin: "signal" | "health" | "budget", reason: string) => {
         if (aborted || childClosed) {
           return;
         }
         aborted = true;
+        abortedByHealth = abortedByHealth || origin === "health";
         abortReason = reason;
-        result.lastAction = `abort: ${reason}`;
+        result.lastAction = `abort: ${truncate(reason, 140)}`;
+        health.noteEvent(`abort:${origin}`);
         updateProgress();
 
         child.kill("SIGTERM");
@@ -641,55 +692,126 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
           return;
         }
 
+        let marker: SubagentProgressMarker = {
+          kind: "other",
+          action: "event:unknown",
+        };
+
         try {
           const event = JSON.parse(line) as {
             type?: string;
             message?: Message;
+            toolName?: string;
+            toolCallId?: string;
+            args?: unknown;
+            isError?: boolean;
           };
 
-          if (event.type !== "message_end" || !event.message) {
-            return;
+          if (event.type === "tool_execution_start" && event.toolName) {
+            observedToolExecutionEvents = true;
+            result.toolCallCount += 1;
+            marker = {
+              kind: "tool_start",
+              action: `tool_start:${event.toolName}`,
+              toolName: event.toolName,
+            };
+
+            const argsRecord = isRecord(event.args) ? event.args : undefined;
+            result.lastAction = summarizeToolCall(event.toolName, argsRecord);
+          } else if (event.type === "tool_execution_end" && event.toolName) {
+            marker = {
+              kind: "tool_end",
+              action: `tool_end:${event.toolName}`,
+              toolName: event.toolName,
+            };
+            result.lastAction = event.isError
+              ? `tool: ${event.toolName} (error)`
+              : `tool: ${event.toolName} done`;
+          } else if (event.type === "message_end" && event.message) {
+            const message = event.message;
+            result.messages.push(message);
+
+            if (message.role === "assistant") {
+              result.stopReason = message.stopReason;
+              result.errorMessage = message.errorMessage ||
+                result.errorMessage ||
+                (message.stopReason === "error" || message.stopReason === "aborted"
+                  ? `assistant ${message.stopReason}`
+                  : undefined);
+
+              if (!result.model && message.model) {
+                result.model = message.model;
+              }
+
+              if (!observedToolExecutionEvents) {
+                const toolCallsInMessage = message.content.filter((part) => part.type === "toolCall").length;
+                if (toolCallsInMessage > 0) {
+                  result.toolCallCount += toolCallsInMessage;
+                }
+              }
+
+              const assistantSummary = summarizeAssistantMessage(message);
+              if (assistantSummary) {
+                result.lastAction = assistantSummary;
+              }
+
+              if (message.usage) {
+                result.usage.turns += 1;
+                result.usage.input += message.usage.input ?? 0;
+                result.usage.output += message.usage.output ?? 0;
+                result.usage.cacheRead += message.usage.cacheRead ?? 0;
+                result.usage.cacheWrite += message.usage.cacheWrite ?? 0;
+                result.usage.cost += message.usage.cost?.total ?? 0;
+                result.usage.contextTokens = message.usage.totalTokens ?? result.usage.contextTokens;
+              }
+
+              if (guardrailBudget.maxTurns && result.usage.turns >= guardrailBudget.maxTurns) {
+                abortChild("budget", `turn budget exceeded (${guardrailBudget.maxTurns})`);
+              }
+
+              marker =
+                message.stopReason === "error" || message.stopReason === "aborted"
+                  ? { kind: "assistant_error", action: `assistant:${message.stopReason}` }
+                  : { kind: "assistant", action: "assistant:message" };
+            } else {
+              marker = {
+                kind: "other",
+                action: `message:${message.role}`,
+              };
+            }
+          } else {
+            marker = {
+              kind: "other",
+              action: `event:${String(event.type ?? "unknown")}`,
+            };
           }
-
-          const message = event.message;
-          result.messages.push(message);
-
-          if (message.role === "assistant") {
-            result.stopReason = message.stopReason;
-            result.errorMessage = message.errorMessage;
-            if (!result.model && message.model) {
-              result.model = message.model;
-            }
-
-            const toolCallsInMessage = message.content.filter((part) => part.type === "toolCall").length;
-            if (toolCallsInMessage > 0) {
-              result.toolCallCount += toolCallsInMessage;
-            }
-
-            const assistantSummary = summarizeAssistantMessage(message);
-            if (assistantSummary) {
-              result.lastAction = assistantSummary;
-            }
-
-            if (message.usage) {
-              result.usage.turns += 1;
-              result.usage.input += message.usage.input ?? 0;
-              result.usage.output += message.usage.output ?? 0;
-              result.usage.cacheRead += message.usage.cacheRead ?? 0;
-              result.usage.cacheWrite += message.usage.cacheWrite ?? 0;
-              result.usage.cost += message.usage.cost?.total ?? 0;
-              result.usage.contextTokens = message.usage.totalTokens ?? result.usage.contextTokens;
-            }
-
-            if (result.usage.turns >= guardrailBudget.maxTurns) {
-              abortChild(`turn budget exceeded (${guardrailBudget.maxTurns})`);
-            }
-          }
-
-          updateProgress();
         } catch {
-          // Ignore malformed JSON lines from subprocess.
+          marker = {
+            kind: "other",
+            action: "event:malformed_json",
+          };
         }
+
+        const fingerprint = buildSubagentProgressFingerprint(result);
+        switch (marker.kind) {
+          case "tool_start":
+            health.noteToolStart(marker.toolName ?? "unknown", marker.action);
+            health.setFingerprint(fingerprint);
+            break;
+          case "tool_end":
+            health.noteToolEnd(marker.toolName, marker.action);
+            health.setFingerprint(fingerprint);
+            break;
+          case "assistant":
+          case "assistant_error":
+            health.noteProgress(marker.action, fingerprint);
+            break;
+          default:
+            health.noteEvent(marker.action);
+            health.setFingerprint(fingerprint);
+        }
+
+        updateProgress();
       };
 
       child.stdout.on("data", (chunk) => {
@@ -707,11 +829,12 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
         const trimmed = text.trim();
         if (trimmed) {
           result.lastAction = `stderr: ${trimmed.split("\n").at(-1)?.slice(0, 120) ?? trimmed.slice(0, 120)}`;
+          health.noteEvent("stderr_output");
           updateProgress();
         }
       });
 
-      const signalAbort = () => abortChild("parent signal canceled subagent");
+      const signalAbort = () => abortChild("signal", "parent signal canceled subagent");
       if (options.signal) {
         if (options.signal.aborted) {
           signalAbort();
@@ -720,15 +843,28 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
         }
       }
 
-      runtimeTimer = setTimeout(() => {
-        abortChild(`runtime budget exceeded (${guardrailBudget.maxRuntimeSeconds}s)`);
-      }, guardrailBudget.maxRuntimeSeconds * 1000);
+      if (guardrailBudget.maxRuntimeSeconds) {
+        runtimeTimer = setTimeout(() => {
+          abortChild("budget", `runtime budget exceeded (${guardrailBudget.maxRuntimeSeconds}s)`);
+        }, guardrailBudget.maxRuntimeSeconds * 1000);
+      }
 
       heartbeatTimer = setInterval(() => {
         if (!childClosed) {
           updateProgress();
         }
       }, 1_000);
+
+      healthTimer = setInterval(() => {
+        if (childClosed) {
+          return;
+        }
+
+        const evaluation = health.evaluate();
+        if (evaluation.abortReason) {
+          abortChild("health", evaluation.abortReason);
+        }
+      }, healthPolicy.pollIntervalMs);
 
       updateProgress();
 
@@ -741,36 +877,20 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
         if (options.signal) {
           options.signal.removeEventListener("abort", signalAbort);
         }
-        if (runtimeTimer) {
-          clearTimeout(runtimeTimer);
-          runtimeTimer = null;
-        }
-        if (forceKillTimer) {
-          clearTimeout(forceKillTimer);
-          forceKillTimer = null;
-        }
-        if (heartbeatTimer) {
-          clearInterval(heartbeatTimer);
-          heartbeatTimer = null;
-        }
+        stopRuntimeTimer();
+        stopForceKillTimer();
+        stopHeartbeatTimer();
+        stopHealthTimer();
 
         resolve(code ?? 0);
       });
 
       child.on("error", () => {
         childClosed = true;
-        if (runtimeTimer) {
-          clearTimeout(runtimeTimer);
-          runtimeTimer = null;
-        }
-        if (forceKillTimer) {
-          clearTimeout(forceKillTimer);
-          forceKillTimer = null;
-        }
-        if (heartbeatTimer) {
-          clearInterval(heartbeatTimer);
-          heartbeatTimer = null;
-        }
+        stopRuntimeTimer();
+        stopForceKillTimer();
+        stopHeartbeatTimer();
+        stopHealthTimer();
         resolve(1);
       });
     });
@@ -778,12 +898,17 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
     result.exitCode = exitCode;
     result.lastUpdateAtMs = Date.now();
     result.elapsedMs = Math.max(0, result.lastUpdateAtMs - result.startedAtMs);
+    result.health = health.summary(aborted ? "aborted" : "ok");
 
     if (aborted) {
       result.stopReason = "aborted";
       if (!result.errorMessage) {
         result.errorMessage = abortReason ?? "Subagent aborted by parent signal.";
       }
+    }
+
+    if (abortedByHealth && !result.errorMessage) {
+      result.errorMessage = "delegated run stalled";
     }
 
     return result;
@@ -794,47 +919,25 @@ async function runSingleAgent(pi: ExtensionAPI, options: RunSingleAgentOptions):
   }
 }
 
-function resolveGuardrailBudget(
-  primary?: Partial<GuardrailBudget>,
-  fallback?: Partial<GuardrailBudget>
-): GuardrailBudget {
-  return {
-    maxTurns: clampInteger(
-      primary?.maxTurns ?? fallback?.maxTurns,
-      DEFAULT_MAX_TURNS,
-      MIN_MAX_TURNS,
-      MAX_MAX_TURNS
-    ),
-    maxRuntimeSeconds: clampInteger(
-      primary?.maxRuntimeSeconds ?? fallback?.maxRuntimeSeconds,
-      DEFAULT_MAX_RUNTIME_SECONDS,
-      MIN_MAX_RUNTIME_SECONDS,
-      MAX_MAX_RUNTIME_SECONDS
-    ),
-  };
+interface SubagentProgressMarker {
+  kind: "tool_start" | "tool_end" | "assistant" | "assistant_error" | "other";
+  action: string;
+  toolName?: string;
 }
 
-function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return fallback;
-  }
-  const rounded = Math.round(value);
-  return Math.min(max, Math.max(min, rounded));
+function buildSubagentProgressFingerprint(result: SingleResult): string {
+  return [
+    result.usage.turns,
+    result.toolCallCount,
+    result.usage.input,
+    result.usage.output,
+    result.messages.length,
+    result.errorMessage ?? "",
+  ].join("|");
 }
 
-function appendSubagentExecutionContract(basePrompt: string, budget: GuardrailBudget): string {
-  const lines = [
-    basePrompt.trim(),
-    "",
-    "Execution contract:",
-    "- Keep investigation bounded and converge quickly.",
-    "- If evidence is sufficient, stop exploring and synthesize.",
-    "- Emit concise status notes while working: `STATUS: <what changed> | next: <next action>`.",
-    `- Hard budget: max ${budget.maxTurns} assistant turns and ${budget.maxRuntimeSeconds}s runtime.`,
-    "- If budget risk is high, summarize best-known answer with explicit uncertainty.",
-  ];
-
-  return lines.join("\n");
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function summarizeAssistantMessage(message: Message): string | undefined {

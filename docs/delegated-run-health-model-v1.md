@@ -14,7 +14,7 @@ This indicates a stalled delegated run (near-zero progress for ~17m), not a vali
 ## Root cause
 
 Reliability policy is inconsistent across delegated execution paths:
-- `subagent` has stronger runtime/turn/heartbeat controls.
+- `subagent` historically had stronger runtime/turn/heartbeat controls.
 - orchestration/member runs use separate spawn logic and rely primarily on coarse governor heuristics.
 
 System design failure: no unified delegated-runner health contract.
@@ -83,7 +83,8 @@ Never silently hang.
 - ✅ `extensions/shared/delegated-health.ts` shipped with stall-aware polling + classification + tool-aware thresholds.
 - ✅ Integrated into `extensions/orchestration/index.ts` delegated member runs.
 - ✅ Integrated into `extensions/bootstrap/index.ts` lane runner (`runPiPrompt`).
-- ⏳ Remaining for full unification: migrate `extensions/subagent/index.ts` to the same shared monitor/recovery envelope.
+- ✅ Integrated into `extensions/subagent/index.ts` with health snapshots surfaced in subagent run details.
+- ⏳ Remaining for full execution-engine unification: consolidate duplicated spawn/parsing code into `extensions/shared/delegation-runner.ts`.
 
 ## Integration points
 

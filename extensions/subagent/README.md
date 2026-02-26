@@ -27,8 +27,8 @@ Modes (exactly one per call):
 Common params:
 - `agentScope`: `user | project | both` (default `user`)
 - `confirmProjectAgents`: boolean (default `true`)
-- `maxTurns`: global turn budget override (default `80`)
-- `maxRuntimeSeconds`: global runtime budget override (default `600`)
+- `maxTurns`: optional global turn cap override
+- `maxRuntimeSeconds`: optional global runtime cap override
 
 Per-task overrides:
 - `tasks[].maxTurns`, `tasks[].maxRuntimeSeconds`
@@ -52,13 +52,18 @@ This repo versions agent definitions under `agents/` and `scripts/bootstrap.sh` 
 ## Runtime visibility
 
 The subagent card now surfaces live state while runs are in progress:
-- runtime elapsed vs configured budget
-- turns consumed vs configured budget
+- runtime elapsed (and cap, if configured)
+- turns consumed (and cap, if configured)
 - tool call count
+- delegated health classification (`healthy|slow|stalled|wedged`)
+- no-progress seconds + stall episode count
 - context/token usage (input/output/cache/context)
 - model used and last observed action
 
-When a budget is exceeded, the subprocess is terminated and returns `aborted` with an explicit reason.
+Subagent runs are now stall-polled via the shared delegated health monitor.
+A run can terminate as `aborted` due to:
+- explicit hard budget exceedance (if caps are configured), or
+- no-progress stall detection from health polling.
 
 ## Agent file format
 
@@ -68,8 +73,8 @@ name: scout
 description: Fast codebase recon
 tools: read, grep, find, ls, bash
 model: openai-codex/gpt-5.3-codex
-maxTurns: 40
-maxRuntimeSeconds: 300
+maxTurns: 40 # optional
+maxRuntimeSeconds: 300 # optional
 ---
 
 System prompt for the agent...
