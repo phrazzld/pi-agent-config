@@ -84,7 +84,7 @@ Never silently hang.
 - ✅ Integrated into `extensions/orchestration/index.ts` delegated member runs.
 - ✅ Integrated into `extensions/bootstrap/index.ts` lane runner (`runPiPrompt`).
 - ✅ Integrated into `extensions/subagent/index.ts` with health snapshots surfaced in subagent run details.
-- ⏳ Remaining for full execution-engine unification: consolidate duplicated spawn/parsing code into `extensions/shared/delegation-runner.ts`.
+- ✅ Shared execution engine extracted at `extensions/shared/delegation-runner.ts` and adopted by subagent/orchestration/bootstrap.
 
 ## Integration points
 
@@ -92,7 +92,7 @@ Never silently hang.
 - `extensions/orchestration/index.ts`
 - `extensions/bootstrap/index.ts` lane runner
 
-Plan: shared `extensions/shared/delegation-runner.ts` with common health instrumentation.
+Current baseline: shared `extensions/shared/delegation-runner.ts` with common health instrumentation.
 
 ## Acceptance criteria
 
@@ -111,3 +111,9 @@ Plan: shared `extensions/shared/delegation-runner.ts` with common health instrum
 - `PI_DELEGATED_HEALTH_ABORT_ACTIVE_TOOL_MS`
 - `PI_DELEGATED_HEALTH_WARN_COOLDOWN_MS`
 - `PI_DELEGATED_HEALTH_DISABLE_ABORT` (warnings-only mode)
+
+
+## Next hardening layer
+
+- Add retry/quorum/degraded completion policy hooks on top of the shared delegation runner.
+- Add focused integration tests for stalled single-tool-call delegated runs and bounded recovery behavior.

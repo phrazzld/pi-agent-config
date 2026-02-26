@@ -98,6 +98,7 @@ Env knobs:
 ## Delegated run health monitor (stall-aware)
 
 Orchestration member runs now include a shared delegated health monitor (`extensions/shared/delegated-health.ts`) that polls progress fingerprints instead of relying on blunt wall-clock cutoffs.
+Execution lifecycle is now unified through `extensions/shared/delegation-runner.ts` across subagent/orchestration/bootstrap.
 
 Primary knobs:
 - `PI_DELEGATED_HEALTH_POLL_MS`

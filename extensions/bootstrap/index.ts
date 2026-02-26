@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -10,11 +9,11 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { parseBootstrapArgs } from "./args";
+import { type DelegatedHealthSummary } from "../shared/delegated-health";
 import {
-  DelegatedRunHealthMonitor,
-  resolveDelegatedHealthPolicy,
-  type DelegatedHealthSummary,
-} from "../shared/delegated-health";
+  runDelegatedCommand,
+  type DelegatedRunnerProgressMarker,
+} from "../shared/delegation-runner";
 
 type ChangeAction = "created" | "updated" | "skipped";
 
@@ -994,61 +993,15 @@ async function runPiPrompt(options: {
 
   args.push(options.task);
 
-  const healthPolicy = resolveDelegatedHealthPolicy(process.env);
-  const health = new DelegatedRunHealthMonitor(`bootstrap:${options.model}`, healthPolicy);
+  let latestAssistantText = "";
+  let stopError = "";
 
-  return await new Promise<PiRunResult>((resolve) => {
-    const proc = spawn("pi", args, {
-      cwd: options.cwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      env: process.env,
-    });
-
-    health.noteEvent("spawn");
-
-    let stdoutBuffer = "";
-    let stderrBuffer = "";
-    let latestAssistantText = "";
-    let stopError = "";
-    let aborted = false;
-    let abortReason = "";
-
-    let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
-    let healthTimer: ReturnType<typeof setInterval> | null = null;
-
-    const stopForceKillTimer = () => {
-      if (forceKillTimer) {
-        clearTimeout(forceKillTimer);
-        forceKillTimer = null;
-      }
-    };
-
-    const stopHealthTimer = () => {
-      if (healthTimer) {
-        clearInterval(healthTimer);
-        healthTimer = null;
-      }
-    };
-
-    const abortChild = (reason: string) => {
-      if (aborted) {
-        return;
-      }
-      aborted = true;
-      abortReason = reason;
-      health.noteEvent("abort:health");
-      stopHealthTimer();
-
-      proc.kill("SIGTERM");
-      forceKillTimer = setTimeout(() => {
-        if (!proc.killed) {
-          proc.kill("SIGKILL");
-        }
-      }, 4_000);
-    };
-
-    const processLine = (line: string) => {
+  const delegated = await runDelegatedCommand({
+    label: `bootstrap:${options.model}`,
+    args,
+    cwd: options.cwd,
+    env: process.env,
+    onStdoutLine: (line) => {
       const parsed = parsePiEvent(line);
       if (!parsed) {
         return;
@@ -1061,113 +1014,54 @@ async function runPiPrompt(options: {
         stopError = parsed.error;
       }
 
-      const fingerprint = buildBootstrapProgressFingerprint(
-        latestAssistantText,
-        stopError,
-        parsed.kind,
-      );
+      const marker: DelegatedRunnerProgressMarker = {
+        kind: parsed.kind,
+        action: parsed.action,
+        toolName: parsed.toolName,
+        fingerprint: buildBootstrapProgressFingerprint(
+          latestAssistantText,
+          stopError,
+          parsed.kind,
+        ),
+      };
 
-      switch (parsed.kind) {
-        case "tool_start":
-          health.noteToolStart(parsed.toolName ?? "unknown", parsed.action);
-          health.setFingerprint(fingerprint);
-          return;
-        case "tool_end":
-          health.noteToolEnd(parsed.toolName, parsed.action);
-          health.setFingerprint(fingerprint);
-          return;
-        case "assistant":
-        case "assistant_error":
-          health.noteProgress(parsed.action, fingerprint);
-          return;
-        default:
-          health.noteEvent(parsed.action);
-          health.setFingerprint(fingerprint);
-      }
-    };
-
-    proc.stdout.on("data", (chunk) => {
-      stdoutBuffer += chunk.toString();
-      const lines = stdoutBuffer.split("\n");
-      stdoutBuffer = lines.pop() ?? "";
-      for (const line of lines) {
-        processLine(line);
-      }
-    });
-
-    proc.stderr.on("data", (chunk) => {
-      const text = chunk.toString();
-      stderrBuffer += text;
-      if (text.trim()) {
-        health.noteEvent("stderr_output");
-      }
-    });
-
-    proc.on("close", (code) => {
-      if (stdoutBuffer.trim()) {
-        processLine(stdoutBuffer.trim());
-      }
-
-      stopHealthTimer();
-      stopForceKillTimer();
-
-      if (aborted && !stopError) {
-        stopError = abortReason || "delegated run stalled";
-      }
-
-      const elapsedMs = Date.now() - started;
-      const stderrLine = firstNonEmptyLine(stderrBuffer);
-      const healthSummary = health.summary(aborted ? "aborted" : "ok");
-
-      if ((code ?? 1) !== 0) {
-        resolve({
-          ok: false,
-          output: latestAssistantText,
-          error: stopError || stderrLine || `pi exited with code ${code}`,
-          elapsedMs,
-          health: healthSummary,
-        });
-        return;
-      }
-
-      if (stopError) {
-        resolve({
-          ok: false,
-          output: latestAssistantText,
-          error: stopError,
-          elapsedMs,
-          health: healthSummary,
-        });
-        return;
-      }
-
-      resolve({
-        ok: true,
-        output: latestAssistantText,
-        elapsedMs,
-        health: healthSummary,
-      });
-    });
-
-    proc.on("error", (error) => {
-      stopHealthTimer();
-      stopForceKillTimer();
-      resolve({
-        ok: false,
-        output: latestAssistantText,
-        error: error.message,
-        elapsedMs: Date.now() - started,
-        health: health.summary(aborted ? "aborted" : "ok"),
-      });
-    });
-
-    healthTimer = setInterval(() => {
-      const evaluation = health.evaluate();
-      if (evaluation.abortReason) {
-        abortChild(evaluation.abortReason);
-      }
-    }, healthPolicy.pollIntervalMs);
+      return { marker };
+    },
   });
+
+  if (delegated.aborted && !stopError) {
+    stopError = delegated.abortReason || "delegated run stalled";
+  }
+
+  const elapsedMs = Date.now() - started;
+  const stderrLine = firstNonEmptyLine(delegated.stderr);
+
+  if (delegated.exitCode !== 0) {
+    return {
+      ok: false,
+      output: latestAssistantText,
+      error: stopError || stderrLine || `pi exited with code ${delegated.exitCode}`,
+      elapsedMs,
+      health: delegated.health,
+    };
+  }
+
+  if (stopError) {
+    return {
+      ok: false,
+      output: latestAssistantText,
+      error: stopError,
+      elapsedMs,
+      health: delegated.health,
+    };
+  }
+
+  return {
+    ok: true,
+    output: latestAssistantText,
+    elapsedMs,
+    health: delegated.health,
+  };
 }
 
 interface ParsedPiEvent {

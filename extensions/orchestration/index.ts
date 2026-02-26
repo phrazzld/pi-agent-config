@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
@@ -24,11 +23,11 @@ import {
   type GovernorOverrides,
   type GovernorSummary,
 } from "./governor";
+import { type DelegatedHealthSummary } from "../shared/delegated-health";
 import {
-  DelegatedRunHealthMonitor,
-  resolveDelegatedHealthPolicy,
-  type DelegatedHealthSummary,
-} from "../shared/delegated-health";
+  runDelegatedCommand,
+  type DelegatedRunnerProgressMarker,
+} from "../shared/delegation-runner";
 
 const ORCHESTRATION_MESSAGE_TYPE = "orchestration";
 const ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE = "orchestration-synthesis";
@@ -1194,12 +1193,6 @@ async function runAgentTaskAttempt(
     const parentDepth = options.runGrant?.depth ?? currentOrchestrationDepth();
     const childDepth = parentDepth + 1;
 
-    const healthPolicy = resolveDelegatedHealthPolicy(process.env);
-    const health = new DelegatedRunHealthMonitor(
-      `orchestration:${config.name}:${runId}`,
-      healthPolicy,
-    );
-
     let slotGrant: AdmissionSlotGrant | null = null;
     if (options.admission) {
       const slotDecision = await options.admission.acquireSlot({
@@ -1216,200 +1209,73 @@ async function runAgentTaskAttempt(
       slotGrant = slotDecision.grant;
     }
 
-    let aborted = false;
-    let abortedByGovernor = false;
-    let abortedByHealth = false;
-    let abortReasonMessage: string | undefined;
-
     try {
-      const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
-        const child = spawn("pi", args, {
-          cwd: options.cwd,
-          stdio: ["ignore", "pipe", "pipe"],
-          shell: false,
-          env: {
-            ...process.env,
-            PI_ORCH_DEPTH: String(childDepth),
-            PI_ORCH_RUN_ID: runId,
-            PI_ORCH_PARENT_AGENT: config.name,
+      const delegated = await runDelegatedCommand({
+        label: `orchestration:${config.name}:${runId}`,
+        args,
+        cwd: options.cwd,
+        env: {
+          ...process.env,
+          PI_ORCH_DEPTH: String(childDepth),
+          PI_ORCH_RUN_ID: runId,
+          PI_ORCH_PARENT_AGENT: config.name,
+        },
+        signal: options.signal,
+        watchdogs: [
+          {
+            intervalMs: governor.policy.checkIntervalMs,
+            origin: "policy",
+            evaluate: () => {
+              const decision = governor.evaluate(Date.now(), result.usage);
+              if (decision.action === "abort") {
+                return decision.message ?? "governor policy triggered";
+              }
+              return undefined;
+            },
           },
-        });
-
-        health.noteEvent("spawn");
-
-        let stdoutBuffer = "";
-        let stderrBuffer = "";
-        let governorTimer: ReturnType<typeof setInterval> | null = null;
-        let healthTimer: ReturnType<typeof setInterval> | null = null;
-        let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
-
-        const stopGovernorTimer = () => {
-          if (governorTimer) {
-            clearInterval(governorTimer);
-            governorTimer = null;
-          }
-        };
-
-        const stopHealthTimer = () => {
-          if (healthTimer) {
-            clearInterval(healthTimer);
-            healthTimer = null;
-          }
-        };
-
-        const stopForceKillTimer = () => {
-          if (forceKillTimer) {
-            clearTimeout(forceKillTimer);
-            forceKillTimer = null;
-          }
-        };
-
-        const abortChild = (origin: "signal" | "governor" | "health", message?: string) => {
-          if (aborted) {
-            return;
-          }
-
-          aborted = true;
-          stopGovernorTimer();
-          stopHealthTimer();
-
-          if (origin === "governor") {
-            abortedByGovernor = true;
-          }
-          if (origin === "health") {
-            abortedByHealth = true;
-          }
-
-          abortReasonMessage = message ?? (origin === "health" ? "delegated run stalled" : "aborted");
-          health.noteEvent(`abort:${origin}`);
-
-          child.kill("SIGTERM");
-          forceKillTimer = setTimeout(() => {
-            if (!child.killed) {
-              child.kill("SIGKILL");
-            }
-          }, 4_000);
-        };
-
-        const evaluateGovernor = () => {
-          const decision = governor.evaluate(Date.now(), result.usage);
-          if (decision.action === "abort") {
-            abortChild("governor", decision.message);
-          }
-        };
-
-        const evaluateHealth = () => {
-          const evaluation = health.evaluate();
-          if (evaluation.abortReason) {
-            abortChild("health", evaluation.abortReason);
-          }
-        };
-
-        const processLine = (line: string) => {
+        ],
+        onStdoutLine: (line) => {
           const marker = applyJsonEvent(line, result, governor);
-          const fingerprint = buildDelegatedProgressFingerprint(result);
-
-          switch (marker.kind) {
-            case "tool_start":
-              health.noteToolStart(marker.toolName ?? "unknown", marker.action);
-              health.setFingerprint(fingerprint);
-              return;
-            case "tool_end":
-              health.noteToolEnd(marker.toolName, marker.action);
-              health.setFingerprint(fingerprint);
-              return;
-            case "assistant":
-            case "assistant_error":
-              health.noteProgress(marker.action, fingerprint);
-              return;
-            default:
-              health.noteEvent(marker.action);
-              health.setFingerprint(fingerprint);
-          }
-        };
-
-        child.stdout.on("data", (chunk) => {
-          stdoutBuffer += chunk.toString();
-          const lines = stdoutBuffer.split("\n");
-          stdoutBuffer = lines.pop() ?? "";
-          for (const line of lines) {
-            processLine(line);
-          }
-        });
-
-        child.stderr.on("data", (chunk) => {
-          const text = chunk.toString();
-          stderrBuffer += text;
-          if (text.trim()) {
-            health.noteEvent("stderr_output");
-          }
-        });
-
-        child.on("close", (code) => {
-          stopGovernorTimer();
-          stopHealthTimer();
-          stopForceKillTimer();
-
-          if (stdoutBuffer.trim()) {
-            processLine(stdoutBuffer);
-          }
-
-          if (stderrBuffer.trim() && result.status !== "failed") {
-            result.error = firstNonEmptyLine(stderrBuffer) ?? stderrBuffer.trim();
-          }
-
-          resolve({ exitCode: code ?? 0, stderr: stderrBuffer });
-        });
-
-        child.on("error", (error) => {
-          stopGovernorTimer();
-          stopHealthTimer();
-          stopForceKillTimer();
-          result.status = "failed";
-          result.error = error.message;
-          resolve({ exitCode: 1, stderr: error.message });
-        });
-
-        governorTimer = setInterval(evaluateGovernor, governor.policy.checkIntervalMs);
-        healthTimer = setInterval(evaluateHealth, healthPolicy.pollIntervalMs);
-
-        if (options.signal) {
-          const abortFromSignal = () => {
-            abortChild("signal", "parent signal canceled delegated run");
+          return {
+            marker: {
+              ...marker,
+              fingerprint: buildDelegatedProgressFingerprint(result),
+            },
           };
-
-          if (options.signal.aborted) {
-            abortFromSignal();
-          } else {
-            options.signal.addEventListener("abort", abortFromSignal, { once: true });
-          }
-        }
+        },
       });
 
+      if (delegated.stderr.trim() && result.status !== "failed") {
+        result.error = firstNonEmptyLine(delegated.stderr) ?? delegated.stderr.trim();
+      }
+
+      const abortedByGovernor = delegated.abortOrigin === "policy";
+      const abortedByHealth = delegated.abortOrigin === "health";
+
       result.governor = governor.summarize(Date.now(), result.usage, abortedByGovernor);
-      result.health = health.summary(aborted ? "aborted" : "ok");
+      result.health = delegated.health;
 
       if (abortedByGovernor) {
         result.status = "failed";
-        result.error = abortReasonMessage ?? "governor policy triggered";
+        result.error = delegated.abortReason ?? "governor policy triggered";
       } else if (abortedByHealth) {
         result.status = "failed";
-        result.error = abortReasonMessage ?? "delegated run stalled";
-      } else if (aborted) {
+        result.error = delegated.abortReason ?? "delegated run stalled";
+      } else if (delegated.aborted) {
         result.status = "failed";
-        result.error = abortReasonMessage ?? "aborted";
+        result.error = delegated.abortReason ?? "aborted";
       }
 
-      if (exitCode !== 0 && !abortedByGovernor) {
+      if (delegated.exitCode !== 0 && !abortedByGovernor) {
         result.status = "failed";
-        result.error = result.error || `exit code ${exitCode}`;
+        result.error = result.error || `exit code ${delegated.exitCode}`;
       }
 
       if (!result.output.trim()) {
         result.output = result.error ? `error: ${result.error}` : "(no output)";
       }
 
-      return { result, stderr };
+      return { result, stderr: delegated.stderr };
     } finally {
       if (slotGrant && options.admission) {
         await options.admission.releaseSlot(
@@ -1425,17 +1291,11 @@ async function runAgentTaskAttempt(
   }
 }
 
-interface DelegatedProgressMarker {
-  kind: "tool_start" | "tool_end" | "assistant" | "assistant_error" | "other";
-  action: string;
-  toolName?: string;
-}
-
 function applyJsonEvent(
   line: string,
   result: AgentRunResult,
   governor?: AdaptiveGovernor,
-): DelegatedProgressMarker {
+): DelegatedRunnerProgressMarker {
   if (!line.trim()) {
     return { kind: "other", action: "event:empty" };
   }
@@ -1490,7 +1350,7 @@ function applyJsonEvent(
       governor?.recordAssistantMessage(text);
     }
 
-    let markerKind: DelegatedProgressMarker["kind"] = "assistant";
+    let markerKind: DelegatedRunnerProgressMarker["kind"] = "assistant";
     let markerAction = "assistant:message";
 
     if (message.stopReason === "error" || message.stopReason === "aborted") {
