@@ -97,6 +97,12 @@ Env knobs:
 
 ## Delegated run health monitor (stall-aware)
 
+## Master-only orchestration policy
+
+- `team_run` and `pipeline_run` are master-only tools (top-level session only).
+- Delegated callers (`PI_DELEGATED_BY!=master`) are denied for team/pipeline fan-out.
+- `subagent` may be called by master and team/pipeline members, but subagents may not invoke `subagent` recursively.
+
 Orchestration member runs now include a shared delegated health monitor (`extensions/shared/delegated-health.ts`) that polls progress fingerprints instead of relying on blunt wall-clock cutoffs.
 Execution lifecycle is now unified through `extensions/shared/delegation-runner.ts` across subagent/orchestration/bootstrap.
 

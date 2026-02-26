@@ -45,6 +45,11 @@ Agent frontmatter can also set defaults:
 
 When `agentScope` includes project agents, interactive confirmation is required by default.
 
+Nested delegation policy:
+- subagents may invoke tools, but **may not invoke `subagent` again**
+- agents spawned via orchestration teams/pipelines may invoke `subagent`
+- team/pipeline tools remain master-only (enforced by orchestration policy)
+
 ## Default source-of-truth setup in this repo
 
 This repo versions agent definitions under `agents/` and `scripts/bootstrap.sh` symlinks it to `~/.pi/agent/agents`.

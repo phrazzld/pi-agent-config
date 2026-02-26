@@ -28,6 +28,13 @@ import {
   runDelegatedCommand,
   type DelegatedRunnerProgressMarker,
 } from "../shared/delegation-runner";
+import {
+  canInvokeSubagentTool,
+  canInvokeTeamTools,
+  formatDelegationPolicyBlock,
+  resolveDelegationCaller,
+  withDelegationCaller,
+} from "../shared/delegation-policy";
 
 const ORCHESTRATION_MESSAGE_TYPE = "orchestration";
 const ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE = "orchestration-synthesis";
@@ -152,7 +159,25 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event) => {
+    const caller = resolveDelegationCaller(process.env);
+
+    if (event.toolName === "team_run" || event.toolName === "pipeline_run") {
+      if (!canInvokeTeamTools(caller)) {
+        return {
+          block: true,
+          reason: formatDelegationPolicyBlock(event.toolName, caller),
+        };
+      }
+    }
+
     if (event.toolName === "subagent") {
+      if (!canInvokeSubagentTool(caller)) {
+        return {
+          block: true,
+          reason: formatDelegationPolicyBlock(event.toolName, caller),
+        };
+      }
+
       const gate = await admission.evaluateToolGate("subagent", currentOrchestrationDepth());
       if (gate !== true) {
         return {
@@ -403,6 +428,20 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
     description: "Execute a configured team in parallel and return member outputs.",
     parameters: TEAM_TOOL_PARAMS,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const caller = resolveDelegationCaller(process.env);
+      if (!canInvokeTeamTools(caller)) {
+        return {
+          content: [{ type: "text", text: formatDelegationPolicyBlock("team_run", caller) }],
+          details: {
+            ok: false,
+            team: params.team,
+            code: "MASTER_ONLY",
+            caller,
+          },
+          isError: true,
+        };
+      }
+
       try {
         const result = await runTeam(pi, ctx, params.team, params.goal, {
           agentScope: (params.agentScope ?? "both") as AgentScope,
@@ -466,6 +505,20 @@ export default function orchestrationExtension(pi: ExtensionAPI): void {
     description: "Execute a configured pipeline sequentially and return step outputs.",
     parameters: PIPELINE_TOOL_PARAMS,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const caller = resolveDelegationCaller(process.env);
+      if (!canInvokeTeamTools(caller)) {
+        return {
+          content: [{ type: "text", text: formatDelegationPolicyBlock("pipeline_run", caller) }],
+          details: {
+            ok: false,
+            pipeline: params.pipeline,
+            code: "MASTER_ONLY",
+            caller,
+          },
+          isError: true,
+        };
+      }
+
       try {
         const result = await runPipeline(pi, ctx, params.pipeline, params.goal, {
           agentScope: (params.agentScope ?? "both") as AgentScope,
@@ -1214,12 +1267,15 @@ async function runAgentTaskAttempt(
         label: `orchestration:${config.name}:${runId}`,
         args,
         cwd: options.cwd,
-        env: {
-          ...process.env,
-          PI_ORCH_DEPTH: String(childDepth),
-          PI_ORCH_RUN_ID: runId,
-          PI_ORCH_PARENT_AGENT: config.name,
-        },
+        env: withDelegationCaller(
+          {
+            ...process.env,
+            PI_ORCH_DEPTH: String(childDepth),
+            PI_ORCH_RUN_ID: runId,
+            PI_ORCH_PARENT_AGENT: config.name,
+          },
+          "team",
+        ),
         signal: options.signal,
         watchdogs: [
           {

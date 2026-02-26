@@ -23,6 +23,12 @@ import {
   resolveGuardrailBudget,
   type GuardrailBudget,
 } from "./guardrails";
+import {
+  canInvokeSubagentTool,
+  formatDelegationPolicyBlock,
+  resolveDelegationCaller,
+  withDelegationCaller,
+} from "../shared/delegation-policy";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_PARALLEL_CONCURRENCY = 4;
@@ -122,6 +128,15 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       "Delegate work to isolated Pi subprocesses. Supports single, parallel, and chain execution modes.",
     parameters: SubagentParams,
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const caller = resolveDelegationCaller(process.env);
+      if (!canInvokeSubagentTool(caller)) {
+        return {
+          content: [{ type: "text", text: formatDelegationPolicyBlock("subagent", caller) }],
+          details: makeDetails("single", params.agentScope ?? "user", null, []),
+          isError: true,
+        };
+      }
+
       const agentScope: AgentScope = params.agentScope ?? "user";
       const discovery = discoverAgents(ctx.cwd, agentScope);
       const agents = discovery.agents;
@@ -620,6 +635,7 @@ async function runSingleAgent(options: RunSingleAgentOptions): Promise<SingleRes
       label: `subagent:${agent.name}:${Date.now()}`,
       args,
       cwd: options.cwd ?? options.defaultCwd,
+      env: withDelegationCaller(process.env, "subagent"),
       signal: options.signal,
       runtimeLimitSeconds: guardrailBudget.maxRuntimeSeconds,
       tickIntervalMs: 1_000,
