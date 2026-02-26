@@ -1,6 +1,6 @@
 # Delegated Run Health Model v1 (stall-aware, progress-based)
 
-Status: draft (postmortem-driven)
+Status: v1 design complete; v0 runtime shipped in `orchestration` + `bootstrap` (shared monitor).
 
 ## Trigger incident
 
@@ -77,6 +77,14 @@ For `stalled/wedged`:
 
 Never silently hang.
 
+
+## Rollout status
+
+- ✅ `extensions/shared/delegated-health.ts` shipped with stall-aware polling + classification + tool-aware thresholds.
+- ✅ Integrated into `extensions/orchestration/index.ts` delegated member runs.
+- ✅ Integrated into `extensions/bootstrap/index.ts` lane runner (`runPiPrompt`).
+- ⏳ Remaining for full unification: migrate `extensions/subagent/index.ts` to the same shared monitor/recovery envelope.
+
 ## Integration points
 
 - `extensions/subagent/index.ts`
@@ -91,3 +99,14 @@ Plan: shared `extensions/shared/delegation-runner.ts` with common health instrum
 2. Stalled run is detected and surfaced with explicit reason within configured stall window.
 3. Parent receives structured health/recovery details for every abnormal termination.
 4. Regression tests cover: healthy long run, silent stall, wedged tool phase, retry success/failure.
+
+
+## Initial runtime knobs
+
+- `PI_DELEGATED_HEALTH_POLL_MS`
+- `PI_DELEGATED_HEALTH_WARN_NO_PROGRESS_MS`
+- `PI_DELEGATED_HEALTH_ABORT_NO_PROGRESS_MS`
+- `PI_DELEGATED_HEALTH_ABORT_QUICK_TOOL_MS`
+- `PI_DELEGATED_HEALTH_ABORT_ACTIVE_TOOL_MS`
+- `PI_DELEGATED_HEALTH_WARN_COOLDOWN_MS`
+- `PI_DELEGATED_HEALTH_DISABLE_ABORT` (warnings-only mode)

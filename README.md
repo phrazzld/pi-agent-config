@@ -250,6 +250,15 @@ Optional watchdog/handoff log knobs:
 - `PI_HANDOFF_EVENT_LOG_ROTATE_CHECK_MS` (default: `10000`)
 - `PI_VISIBILITY_LOG_MAX_BYTES` / `PI_PR_GOV_LOG_MAX_BYTES` / `PI_WEB_SEARCH_LOG_MAX_BYTES` (default: `10485760` / `5242880` / `10485760`)
 
+Optional delegated-run health knobs (stall-aware polling):
+- `PI_DELEGATED_HEALTH_POLL_MS` (default: `5000`)
+- `PI_DELEGATED_HEALTH_WARN_NO_PROGRESS_MS` (default: `120000`)
+- `PI_DELEGATED_HEALTH_ABORT_NO_PROGRESS_MS` (default: `900000`)
+- `PI_DELEGATED_HEALTH_ABORT_QUICK_TOOL_MS` (default: `300000`)
+- `PI_DELEGATED_HEALTH_ABORT_ACTIVE_TOOL_MS` (default: `1800000`)
+- `PI_DELEGATED_HEALTH_WARN_COOLDOWN_MS` (default: `60000`)
+- `PI_DELEGATED_HEALTH_DISABLE_ABORT` (default: `false`; warnings-only mode)
+
 ## Extension Tests (lightweight harness)
 ```bash
 ./scripts/test-extensions.sh

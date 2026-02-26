@@ -10,6 +10,11 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 
 import { parseBootstrapArgs } from "./args";
+import {
+  DelegatedRunHealthMonitor,
+  resolveDelegatedHealthPolicy,
+  type DelegatedHealthSummary,
+} from "../shared/delegated-health";
 
 type ChangeAction = "created" | "updated" | "skipped";
 
@@ -71,6 +76,7 @@ interface PiRunResult {
   output: string;
   error?: string;
   elapsedMs: number;
+  health?: DelegatedHealthSummary;
 }
 
 interface BootstrapLaneProgress {
@@ -988,6 +994,9 @@ async function runPiPrompt(options: {
 
   args.push(options.task);
 
+  const healthPolicy = resolveDelegatedHealthPolicy(process.env);
+  const health = new DelegatedRunHealthMonitor(`bootstrap:${options.model}`, healthPolicy);
+
   return await new Promise<PiRunResult>((resolve) => {
     const proc = spawn("pi", args, {
       cwd: options.cwd,
@@ -996,46 +1005,119 @@ async function runPiPrompt(options: {
       env: process.env,
     });
 
+    health.noteEvent("spawn");
+
     let stdoutBuffer = "";
     let stderrBuffer = "";
     let latestAssistantText = "";
     let stopError = "";
+    let aborted = false;
+    let abortReason = "";
+
+    let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+    let healthTimer: ReturnType<typeof setInterval> | null = null;
+
+    const stopForceKillTimer = () => {
+      if (forceKillTimer) {
+        clearTimeout(forceKillTimer);
+        forceKillTimer = null;
+      }
+    };
+
+    const stopHealthTimer = () => {
+      if (healthTimer) {
+        clearInterval(healthTimer);
+        healthTimer = null;
+      }
+    };
+
+    const abortChild = (reason: string) => {
+      if (aborted) {
+        return;
+      }
+      aborted = true;
+      abortReason = reason;
+      health.noteEvent("abort:health");
+      stopHealthTimer();
+
+      proc.kill("SIGTERM");
+      forceKillTimer = setTimeout(() => {
+        if (!proc.killed) {
+          proc.kill("SIGKILL");
+        }
+      }, 4_000);
+    };
+
+    const processLine = (line: string) => {
+      const parsed = parsePiEvent(line);
+      if (!parsed) {
+        return;
+      }
+
+      if (parsed.text) {
+        latestAssistantText = parsed.text;
+      }
+      if (parsed.error) {
+        stopError = parsed.error;
+      }
+
+      const fingerprint = buildBootstrapProgressFingerprint(
+        latestAssistantText,
+        stopError,
+        parsed.kind,
+      );
+
+      switch (parsed.kind) {
+        case "tool_start":
+          health.noteToolStart(parsed.toolName ?? "unknown", parsed.action);
+          health.setFingerprint(fingerprint);
+          return;
+        case "tool_end":
+          health.noteToolEnd(parsed.toolName, parsed.action);
+          health.setFingerprint(fingerprint);
+          return;
+        case "assistant":
+        case "assistant_error":
+          health.noteProgress(parsed.action, fingerprint);
+          return;
+        default:
+          health.noteEvent(parsed.action);
+          health.setFingerprint(fingerprint);
+      }
+    };
 
     proc.stdout.on("data", (chunk) => {
       stdoutBuffer += chunk.toString();
       const lines = stdoutBuffer.split("\n");
       stdoutBuffer = lines.pop() ?? "";
       for (const line of lines) {
-        const parsed = parseAssistantEvent(line);
-        if (!parsed) {
-          continue;
-        }
-        if (parsed.text) {
-          latestAssistantText = parsed.text;
-        }
-        if (parsed.error) {
-          stopError = parsed.error;
-        }
+        processLine(line);
       }
     });
 
     proc.stderr.on("data", (chunk) => {
-      stderrBuffer += chunk.toString();
+      const text = chunk.toString();
+      stderrBuffer += text;
+      if (text.trim()) {
+        health.noteEvent("stderr_output");
+      }
     });
 
     proc.on("close", (code) => {
       if (stdoutBuffer.trim()) {
-        const parsed = parseAssistantEvent(stdoutBuffer.trim());
-        if (parsed?.text) {
-          latestAssistantText = parsed.text;
-        }
-        if (parsed?.error) {
-          stopError = parsed.error;
-        }
+        processLine(stdoutBuffer.trim());
+      }
+
+      stopHealthTimer();
+      stopForceKillTimer();
+
+      if (aborted && !stopError) {
+        stopError = abortReason || "delegated run stalled";
       }
 
       const elapsedMs = Date.now() - started;
       const stderrLine = firstNonEmptyLine(stderrBuffer);
+      const healthSummary = health.summary(aborted ? "aborted" : "ok");
 
       if ((code ?? 1) !== 0) {
         resolve({
@@ -1043,6 +1125,7 @@ async function runPiPrompt(options: {
           output: latestAssistantText,
           error: stopError || stderrLine || `pi exited with code ${code}`,
           elapsedMs,
+          health: healthSummary,
         });
         return;
       }
@@ -1053,6 +1136,7 @@ async function runPiPrompt(options: {
           output: latestAssistantText,
           error: stopError,
           elapsedMs,
+          health: healthSummary,
         });
         return;
       }
@@ -1061,29 +1145,73 @@ async function runPiPrompt(options: {
         ok: true,
         output: latestAssistantText,
         elapsedMs,
+        health: healthSummary,
       });
     });
 
     proc.on("error", (error) => {
+      stopHealthTimer();
+      stopForceKillTimer();
       resolve({
         ok: false,
         output: latestAssistantText,
         error: error.message,
         elapsedMs: Date.now() - started,
+        health: health.summary(aborted ? "aborted" : "ok"),
       });
     });
+
+    healthTimer = setInterval(() => {
+      const evaluation = health.evaluate();
+      if (evaluation.abortReason) {
+        abortChild(evaluation.abortReason);
+      }
+    }, healthPolicy.pollIntervalMs);
   });
 }
 
-function parseAssistantEvent(line: string): { text?: string; error?: string } | null {
+interface ParsedPiEvent {
+  kind: "tool_start" | "tool_end" | "assistant" | "assistant_error" | "other";
+  action: string;
+  toolName?: string;
+  text?: string;
+  error?: string;
+}
+
+function parsePiEvent(line: string): ParsedPiEvent | null {
   if (!line.trim()) {
     return null;
   }
 
   try {
-    const event = JSON.parse(line) as { type?: string; message?: Message };
+    const event = JSON.parse(line) as {
+      type?: string;
+      message?: Message;
+      toolName?: string;
+      toolCallId?: string;
+    };
+
+    if (event.type === "tool_execution_start" && event.toolName) {
+      return {
+        kind: "tool_start",
+        action: `tool_start:${event.toolName}`,
+        toolName: event.toolName,
+      };
+    }
+
+    if (event.type === "tool_execution_end" && event.toolName) {
+      return {
+        kind: "tool_end",
+        action: `tool_end:${event.toolName}`,
+        toolName: event.toolName,
+      };
+    }
+
     if (event.type !== "message_end" || !event.message || event.message.role !== "assistant") {
-      return null;
+      return {
+        kind: "other",
+        action: `event:${String(event.type ?? "unknown")}`,
+      };
     }
 
     const text = extractAssistantText(event.message);
@@ -1093,12 +1221,25 @@ function parseAssistantEvent(line: string): { text?: string; error?: string } | 
         : "");
 
     return {
-      text,
+      kind: error ? "assistant_error" : "assistant",
+      action: error ? `assistant:${error}` : "assistant:message",
+      text: text || undefined,
       error: error || undefined,
     };
   } catch {
-    return null;
+    return {
+      kind: "other",
+      action: "event:malformed_json",
+    };
   }
+}
+
+function buildBootstrapProgressFingerprint(
+  latestAssistantText: string,
+  stopError: string,
+  markerKind: ParsedPiEvent["kind"],
+): string {
+  return `${latestAssistantText.length}|${stopError}|${markerKind}`;
 }
 
 function parseBootstrapPlan(raw: string): BootstrapPlan | null {

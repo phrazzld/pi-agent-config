@@ -39,7 +39,7 @@ Build a world-class, explicit Pi configuration system with:
 - [ ] Tighten governor defaults (`enforce` where justified) with lower-latency checks for runaway detection.
 - [ ] Add weekly telemetry rollup/aggregation over bounded NDJSON logs.
 - [ ] Define and ship an opinionated Pi framework layer (stable defaults + extension contracts + upgrade lane).
-- [ ] Replace blunt delegated-agent kill switches with progress-health polling and stall-aware recovery.
+- [x] Replace blunt delegated-agent kill switches with progress-health polling and stall-aware recovery (orchestration + bootstrap lanes).
 
 ## Restart Checklist (next session)
 
@@ -53,7 +53,7 @@ Build a world-class, explicit Pi configuration system with:
 
 ### Now
 
-- [ ] Build unified delegated-runner health model (heartbeat + progress diff + stall classifier + recovery policy).
+- [ ] Complete unified delegated-runner health model adoption by migrating `extensions/subagent` to shared health-monitor semantics + structured recovery envelopes.
 - [ ] Run 24h mixed-workload soak with admission state + breaker telemetry review.
 - [ ] Add idempotency key + dedup in orchestration admission path.
 - [ ] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.

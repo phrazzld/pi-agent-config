@@ -24,6 +24,11 @@ import {
   type GovernorOverrides,
   type GovernorSummary,
 } from "./governor";
+import {
+  DelegatedRunHealthMonitor,
+  resolveDelegatedHealthPolicy,
+  type DelegatedHealthSummary,
+} from "../shared/delegated-health";
 
 const ORCHESTRATION_MESSAGE_TYPE = "orchestration";
 const ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE = "orchestration-synthesis";
@@ -87,6 +92,7 @@ interface AgentRunResult {
   error?: string;
   usage: AgentUsage;
   governor?: GovernorSummary;
+  health?: DelegatedHealthSummary;
   stepIndex?: number;
 }
 
@@ -1188,6 +1194,12 @@ async function runAgentTaskAttempt(
     const parentDepth = options.runGrant?.depth ?? currentOrchestrationDepth();
     const childDepth = parentDepth + 1;
 
+    const healthPolicy = resolveDelegatedHealthPolicy(process.env);
+    const health = new DelegatedRunHealthMonitor(
+      `orchestration:${config.name}:${runId}`,
+      healthPolicy,
+    );
+
     let slotGrant: AdmissionSlotGrant | null = null;
     if (options.admission) {
       const slotDecision = await options.admission.acquireSlot({
@@ -1206,7 +1218,9 @@ async function runAgentTaskAttempt(
 
     let aborted = false;
     let abortedByGovernor = false;
-    let governorAbortMessage: string | undefined;
+    let abortedByHealth = false;
+    let abortReasonMessage: string | undefined;
+
     try {
       const { exitCode, stderr } = await new Promise<{ exitCode: number; stderr: string }>((resolve) => {
         const child = spawn("pi", args, {
@@ -1221,9 +1235,13 @@ async function runAgentTaskAttempt(
           },
         });
 
+        health.noteEvent("spawn");
+
         let stdoutBuffer = "";
         let stderrBuffer = "";
         let governorTimer: ReturnType<typeof setInterval> | null = null;
+        let healthTimer: ReturnType<typeof setInterval> | null = null;
+        let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
 
         const stopGovernorTimer = () => {
           if (governorTimer) {
@@ -1232,23 +1250,45 @@ async function runAgentTaskAttempt(
           }
         };
 
-        const abortChild = (origin: "signal" | "governor", message?: string) => {
+        const stopHealthTimer = () => {
+          if (healthTimer) {
+            clearInterval(healthTimer);
+            healthTimer = null;
+          }
+        };
+
+        const stopForceKillTimer = () => {
+          if (forceKillTimer) {
+            clearTimeout(forceKillTimer);
+            forceKillTimer = null;
+          }
+        };
+
+        const abortChild = (origin: "signal" | "governor" | "health", message?: string) => {
           if (aborted) {
             return;
           }
+
           aborted = true;
           stopGovernorTimer();
+          stopHealthTimer();
+
           if (origin === "governor") {
             abortedByGovernor = true;
-            governorAbortMessage = message ?? "governor policy triggered";
+          }
+          if (origin === "health") {
+            abortedByHealth = true;
           }
 
+          abortReasonMessage = message ?? (origin === "health" ? "delegated run stalled" : "aborted");
+          health.noteEvent(`abort:${origin}`);
+
           child.kill("SIGTERM");
-          setTimeout(() => {
+          forceKillTimer = setTimeout(() => {
             if (!child.killed) {
               child.kill("SIGKILL");
             }
-          }, 4000);
+          }, 4_000);
         };
 
         const evaluateGovernor = () => {
@@ -1258,24 +1298,60 @@ async function runAgentTaskAttempt(
           }
         };
 
+        const evaluateHealth = () => {
+          const evaluation = health.evaluate();
+          if (evaluation.abortReason) {
+            abortChild("health", evaluation.abortReason);
+          }
+        };
+
+        const processLine = (line: string) => {
+          const marker = applyJsonEvent(line, result, governor);
+          const fingerprint = buildDelegatedProgressFingerprint(result);
+
+          switch (marker.kind) {
+            case "tool_start":
+              health.noteToolStart(marker.toolName ?? "unknown", marker.action);
+              health.setFingerprint(fingerprint);
+              return;
+            case "tool_end":
+              health.noteToolEnd(marker.toolName, marker.action);
+              health.setFingerprint(fingerprint);
+              return;
+            case "assistant":
+            case "assistant_error":
+              health.noteProgress(marker.action, fingerprint);
+              return;
+            default:
+              health.noteEvent(marker.action);
+              health.setFingerprint(fingerprint);
+          }
+        };
+
         child.stdout.on("data", (chunk) => {
           stdoutBuffer += chunk.toString();
           const lines = stdoutBuffer.split("\n");
           stdoutBuffer = lines.pop() ?? "";
           for (const line of lines) {
-            applyJsonEvent(line, result, governor);
+            processLine(line);
           }
         });
 
         child.stderr.on("data", (chunk) => {
-          stderrBuffer += chunk.toString();
+          const text = chunk.toString();
+          stderrBuffer += text;
+          if (text.trim()) {
+            health.noteEvent("stderr_output");
+          }
         });
 
         child.on("close", (code) => {
           stopGovernorTimer();
+          stopHealthTimer();
+          stopForceKillTimer();
 
           if (stdoutBuffer.trim()) {
-            applyJsonEvent(stdoutBuffer, result, governor);
+            processLine(stdoutBuffer);
           }
 
           if (stderrBuffer.trim() && result.status !== "failed") {
@@ -1287,16 +1363,19 @@ async function runAgentTaskAttempt(
 
         child.on("error", (error) => {
           stopGovernorTimer();
+          stopHealthTimer();
+          stopForceKillTimer();
           result.status = "failed";
           result.error = error.message;
           resolve({ exitCode: 1, stderr: error.message });
         });
 
         governorTimer = setInterval(evaluateGovernor, governor.policy.checkIntervalMs);
+        healthTimer = setInterval(evaluateHealth, healthPolicy.pollIntervalMs);
 
         if (options.signal) {
           const abortFromSignal = () => {
-            abortChild("signal", "aborted");
+            abortChild("signal", "parent signal canceled delegated run");
           };
 
           if (options.signal.aborted) {
@@ -1308,13 +1387,17 @@ async function runAgentTaskAttempt(
       });
 
       result.governor = governor.summarize(Date.now(), result.usage, abortedByGovernor);
+      result.health = health.summary(aborted ? "aborted" : "ok");
 
       if (abortedByGovernor) {
         result.status = "failed";
-        result.error = governorAbortMessage ?? "governor policy triggered";
+        result.error = abortReasonMessage ?? "governor policy triggered";
+      } else if (abortedByHealth) {
+        result.status = "failed";
+        result.error = abortReasonMessage ?? "delegated run stalled";
       } else if (aborted) {
         result.status = "failed";
-        result.error = "aborted";
+        result.error = abortReasonMessage ?? "aborted";
       }
 
       if (exitCode !== 0 && !abortedByGovernor) {
@@ -1342,9 +1425,19 @@ async function runAgentTaskAttempt(
   }
 }
 
-function applyJsonEvent(line: string, result: AgentRunResult, governor?: AdaptiveGovernor): void {
+interface DelegatedProgressMarker {
+  kind: "tool_start" | "tool_end" | "assistant" | "assistant_error" | "other";
+  action: string;
+  toolName?: string;
+}
+
+function applyJsonEvent(
+  line: string,
+  result: AgentRunResult,
+  governor?: AdaptiveGovernor,
+): DelegatedProgressMarker {
   if (!line.trim()) {
-    return;
+    return { kind: "other", action: "event:empty" };
   }
 
   try {
@@ -1360,21 +1453,35 @@ function applyJsonEvent(line: string, result: AgentRunResult, governor?: Adaptiv
     if (event.type === "tool_execution_start" && event.toolCallId && event.toolName) {
       result.usage.toolCalls += 1;
       governor?.recordToolStart(event.toolCallId, event.toolName, event.args ?? {});
-      return;
+      return {
+        kind: "tool_start",
+        action: `tool_start:${event.toolName}`,
+        toolName: event.toolName,
+      };
     }
 
     if (event.type === "tool_execution_end" && event.toolCallId && event.toolName) {
       governor?.recordToolEnd(event.toolCallId, event.toolName, event.isError === true);
-      return;
+      return {
+        kind: "tool_end",
+        action: `tool_end:${event.toolName}`,
+        toolName: event.toolName,
+      };
     }
 
     if (event.type !== "message_end" || !event.message) {
-      return;
+      return {
+        kind: "other",
+        action: `event:${String(event.type ?? "unknown")}`,
+      };
     }
 
     const message = event.message;
     if (message.role !== "assistant") {
-      return;
+      return {
+        kind: "other",
+        action: `message:${message.role}`,
+      };
     }
 
     const text = extractAssistantText(message);
@@ -1383,11 +1490,14 @@ function applyJsonEvent(line: string, result: AgentRunResult, governor?: Adaptiv
       governor?.recordAssistantMessage(text);
     }
 
+    let markerKind: DelegatedProgressMarker["kind"] = "assistant";
+    let markerAction = "assistant:message";
+
     if (message.stopReason === "error" || message.stopReason === "aborted") {
       result.status = "failed";
-      if (message.errorMessage) {
-        result.error = message.errorMessage;
-      }
+      result.error = message.errorMessage || result.error || `assistant ${message.stopReason}`;
+      markerKind = "assistant_error";
+      markerAction = `assistant:${message.stopReason}`;
     }
 
     if (message.usage) {
@@ -1399,9 +1509,28 @@ function applyJsonEvent(line: string, result: AgentRunResult, governor?: Adaptiv
       result.usage.cost += message.usage.cost?.total ?? 0;
       result.usage.contextTokens = message.usage.totalTokens ?? result.usage.contextTokens;
     }
+
+    return {
+      kind: markerKind,
+      action: markerAction,
+    };
   } catch {
-    // ignore malformed lines
+    return {
+      kind: "other",
+      action: "event:malformed_json",
+    };
   }
+}
+
+function buildDelegatedProgressFingerprint(result: AgentRunResult): string {
+  return [
+    result.usage.turns,
+    result.usage.toolCalls,
+    result.usage.input,
+    result.usage.output,
+    result.output.length,
+    result.error ?? "",
+  ].join("|");
 }
 
 function extractAssistantText(message: Message): string {

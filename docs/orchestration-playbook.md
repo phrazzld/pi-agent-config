@@ -95,6 +95,19 @@ Env knobs:
 - `PI_ORCH_GOV_MAX_COST_USD`
 - `PI_ORCH_GOV_MAX_TOKENS`
 
+## Delegated run health monitor (stall-aware)
+
+Orchestration member runs now include a shared delegated health monitor (`extensions/shared/delegated-health.ts`) that polls progress fingerprints instead of relying on blunt wall-clock cutoffs.
+
+Primary knobs:
+- `PI_DELEGATED_HEALTH_POLL_MS`
+- `PI_DELEGATED_HEALTH_WARN_NO_PROGRESS_MS`
+- `PI_DELEGATED_HEALTH_ABORT_NO_PROGRESS_MS`
+- `PI_DELEGATED_HEALTH_ABORT_QUICK_TOOL_MS`
+- `PI_DELEGATED_HEALTH_ABORT_ACTIVE_TOOL_MS`
+- `PI_DELEGATED_HEALTH_WARN_COOLDOWN_MS`
+- `PI_DELEGATED_HEALTH_DISABLE_ABORT`
+
 Command overrides (`/team`, `/pipeline`):
 - `--gov-mode observe|warn|enforce`
 - `--gov-max-cost <usd>`
