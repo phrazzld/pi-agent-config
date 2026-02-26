@@ -128,6 +128,7 @@ const MODEL_SYNTHESIS = process.env.PI_BOOTSTRAP_MODEL_SYNTHESIS?.trim() || "ope
 
 const REQUIRED_FILES = [
   ".pi/settings.json",
+  ".pi/persona.md",
   ".pi/agents/planner.md",
   ".pi/agents/worker.md",
   ".pi/agents/reviewer.md",
@@ -137,6 +138,7 @@ const REQUIRED_FILES = [
   ".pi/prompts/design.md",
   ".pi/prompts/deliver.md",
   ".pi/prompts/review.md",
+  "AGENTS.md",
   "docs/pi-local-workflow.md",
   ".pi/bootstrap-report.md",
 ];
@@ -415,6 +417,7 @@ async function runSynthesisLane(
     "{",
     '  "files": {',
     '    ".pi/settings.json": "...",',
+    '    ".pi/persona.md": "...",',
     '    ".pi/agents/planner.md": "...",',
     '    ".pi/agents/worker.md": "...",',
     '    ".pi/agents/reviewer.md": "...",',
@@ -433,6 +436,7 @@ async function runSynthesisLane(
     "",
     "Requirements:",
     "- settings.json must be valid JSON with explicit local intent.",
+    "- .pi/persona.md should define the local repo persona, tone, and decision posture.",
     "- settings.prompts must explicitly allow-list local prompts via + paths.",
     "- Teams and pipelines must only reference agents that exist in files output.",
     "- Include at least one repo-specific delivery pipeline.",
@@ -1008,6 +1012,7 @@ function fallbackPlan(facts: RepoFacts, lanes: LaneResult[]): BootstrapPlan {
       ".pi/prompts/design.md": designPromptTemplate(facts),
       ".pi/prompts/deliver.md": deliverPromptTemplate(facts),
       ".pi/prompts/review.md": reviewPromptTemplate(facts),
+      "AGENTS.md": agentsTemplate(facts),
       "docs/pi-local-workflow.md": localWorkflowTemplate(facts),
       ".pi/bootstrap-report.md": report,
     },
@@ -1785,6 +1790,56 @@ export function inferRecommendedTarget(facts: RepoFacts, lanes: LaneResult[]): s
   return "build";
 }
 
+
+function personaTemplate(facts: RepoFacts): string {
+  const stack = facts.stackHints.join(", ") || "general software";
+  const qualityScripts = facts.scripts.filter((script) => /test|lint|type|check|build/i.test(script));
+
+  return [
+    "# Local Persona",
+    "",
+    `Name: ${facts.domain}-operator`,
+    "",
+    "## Mission",
+    `Operate as the most effective AI engineer for this repository (${facts.domain}) with strong local-context fit.`,
+    "",
+    "## Behavioral posture",
+    "- Be decisive, practical, and explicit about tradeoffs.",
+    "- Prefer root-cause fixes and strategic simplification over patches.",
+    "- Keep changes auditable and scoped.",
+    "",
+    "## Context anchors",
+    `- Domain: ${facts.domain}`,
+    `- Stack hints: ${stack}`,
+    `- Package manager: ${facts.packageManager}`,
+    `- Quality scripts: ${qualityScripts.join(", ") || "none"}`,
+    "",
+    "## Delivery contract",
+    "- Plan before non-trivial changes.",
+    "- Verify with relevant local checks.",
+    "- Report residual risk and follow-ups.",
+    "",
+  ].join("\n");
+}
+
+function agentsTemplate(facts: RepoFacts): string {
+  return [
+    "# AGENTS.md — " + facts.domain,
+    "",
+    "## Scope",
+    "- " + facts.domain + " repository-specific Pi foundation.",
+    "- Optimized for " + facts.stackHints.join(", ") + ".",
+    "",
+    "## Engineering doctrine",
+    "- Root-cause remediation over symptom patching.",
+    "- Favor convention over configuration.",
+    "",
+    "## Quality bar",
+    "- " + (facts.packageManager === "npm" ? "Ensure \\`npm test\\` passes before merge." : "Ensure local tests pass before merge."),
+    "- Meaningful test coverage over line-count gaming.",
+  ].join("\\n");
+}
+
 function plannerTemplate(facts: RepoFacts): string {
   return [
     "---",
@@ -1796,6 +1851,7 @@ function plannerTemplate(facts: RepoFacts): string {
     "Role: repo-local planner.",
     "Objective: convert intent into a focused implementation design that matches this repository's workflow reality.",
     "Latitude: explore context broadly, then compress into a minimal executable plan.",
+    "Use `.pi/persona.md` as the base local persona contract.",
     "",
     "Success criteria:",
     `- align with package manager: ${facts.packageManager}`,
@@ -1823,6 +1879,7 @@ function workerTemplate(facts: RepoFacts): string {
     "Role: repo-local implementer.",
     "Objective: execute approved scope with precision, explicit verification, and minimal collateral change.",
     "Latitude: use engineering judgment, but keep diffs auditable and focused.",
+    "Use `.pi/persona.md` as the base local persona contract.",
     "",
     "Success criteria:",
     `- uses local tooling (${facts.packageManager}) and quality scripts when relevant`,
@@ -1848,6 +1905,7 @@ function reviewerTemplate(facts: RepoFacts): string {
     "Role: final reviewer.",
     "Objective: detect correctness, risk, and maintainability issues before shipping.",
     "Latitude: be concise, specific, and severity-driven.",
+    "Use `.pi/persona.md` as the base local persona contract.",
     "",
     "Review focus:",
     `- stack hints: ${facts.stackHints.join(", ") || "none"}`,
@@ -2003,6 +2061,7 @@ function localWorkflowTemplate(facts: RepoFacts): string {
     "## Local artifacts",
     "",
     "- `.pi/settings.json`",
+    "- `.pi/persona.md`",
     "- `.pi/agents/*.md`",
     "- `.pi/agents/teams.yaml`",
     "- `.pi/agents/pipelines.yaml`",

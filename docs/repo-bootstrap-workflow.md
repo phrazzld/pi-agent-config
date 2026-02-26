@@ -40,6 +40,7 @@ No separate plan-only command is required for normal workflow.
 
 - Foundation is clearly repo-specific, not generic scaffolding.
 - Local config is explicit and auditable (narrow opt-ins).
+- Persona contract is generated/updated for the repo (`.pi/persona.md` + `AGENTS.md`).
 - Workflows support explore -> design -> implement -> review.
 - Prompts/agents are goal-oriented, not brittle procedural scripts.
 - Ambition checkpoint yields one accretive high-leverage addition with explicit validation.

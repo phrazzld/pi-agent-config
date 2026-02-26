@@ -29,7 +29,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `extensions/handoff`: per-workspace crash-recovery snapshots (`.pi/state/session-handoff.json`)
 - `extensions/ops-watchdog`: host Node-process/RSS watchdog telemetry + optional enforced command bounds
 - `extensions/daybook`: charisma-first one-on-one journaling posture with tone controls
-- `extensions/bootstrap`: opinionated `/bootstrap-repo` primitive (always plan + ambition pass + apply) for repo-local `.pi/` foundations, with ambition scoring + consensus quality gate scorecard
+- `extensions/bootstrap`: opinionated `/bootstrap-repo` primitive (always plan + ambition pass + apply) for repo-local `.pi/` foundations, with ambition scoring + consensus quality gate scorecard + repo persona artifacts
 
 ## Included Skills
 - `skills/web-search`: retrieval-first web research workflow and output contract

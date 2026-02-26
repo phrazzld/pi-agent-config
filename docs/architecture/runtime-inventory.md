@@ -11,7 +11,7 @@
 | `guardrails` | 4 | 0 | 1 |
 | `handoff` | 1 | 0 | 0 |
 | `ops-watchdog` | 3 | 0 | 0 |
-| `orchestration` | 8 | 2 | 4 |
+| `orchestration` | 8 | 2 | 5 |
 | `organic-workflows` | 4 | 3 | 1 |
 | `profiles` | 1 | 0 | 0 |
 | `subagent` | 0 | 1 | 2 |

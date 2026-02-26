@@ -79,6 +79,7 @@ Run example:
 - Tool: `bootstrap_repo`
 - Default mode is opinionated: always multi-lane exploration + ambition pass + synthesis
 - Generated `.pi/bootstrap-report.md` now includes a quality gate scorecard (ambition score + consensus validation).
+- Bootstrap emits repo persona artifacts (`.pi/persona.md` + `AGENTS.md`) for local behavior identity.
 - Legacy `--quick` / `--max` toggles are ignored for simplicity
 
 ## Memory primitives

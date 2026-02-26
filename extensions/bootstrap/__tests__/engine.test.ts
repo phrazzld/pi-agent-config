@@ -59,6 +59,7 @@ function basePlan(overrides: Record<string, string> = {}): BootstrapPlan {
   return {
     files: {
       ".pi/settings.json": "{}\n",
+      ".pi/persona.md": "# Local Persona\n\nName: acme-operator",
       ".pi/agents/planner.md": "planner",
       ".pi/agents/worker.md": "worker",
       ".pi/agents/reviewer.md": "reviewer",
@@ -74,6 +75,7 @@ function basePlan(overrides: Record<string, string> = {}): BootstrapPlan {
       ".pi/prompts/design.md": LONG_PROMPT,
       ".pi/prompts/deliver.md": LONG_PROMPT,
       ".pi/prompts/review.md": LONG_PROMPT,
+      "AGENTS.md": "# AGENTS\n\nRepo-local operating context.",
       "docs/pi-local-workflow.md": "workflow",
       ".pi/bootstrap-report.md": [
         "# Pi Bootstrap Report",

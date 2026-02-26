@@ -5,6 +5,8 @@ One-on-one journaling posture optimized for charisma and reflection quality.
 ## What it adds
 
 - Daybook system-prompt overlay on every run
+- Status command:
+  - `/daybook`
 - Tone control command:
   - `/daybook-tone charismatic|calm|coach`
 - Quick conversation starter:

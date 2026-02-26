@@ -13,6 +13,7 @@ Use this skill when creating or redesigning a repository's local Pi foundation.
 - Maximize exploration quality, then synthesize.
 - Keep output focused and auditable.
 - Bias toward repo-specific fit over generic templates.
+- **Always generate or update a repo-local persona contract (`.pi/persona.md` + `AGENTS.md`).**
 
 ## Workflow
 
@@ -27,9 +28,10 @@ Use this skill when creating or redesigning a repository's local Pi foundation.
    - Critic lanes: adversarial/review-strong models.
 
 3. **Synthesize with strict output contract**
-   - Emit concrete artifacts (settings, overlays, prompts, pipelines, local workflow doc).
+   - Emit concrete artifacts (settings, overlays, prompts, pipelines, local workflow doc, **.pi/persona.md**, and **AGENTS.md**).
    - Require explicit opt-ins in settings.
    - Keep role overlays goal-oriented (role + objective + success criteria + output contract).
+   - **Define the local persona in `.pi/persona.md` and AGENTS.md**: objective, engineering doctrine, and quality bar specific to the repo.
 
 4. **Pressure test before finalize**
    - Surface failure modes and maintenance burden.
@@ -40,6 +42,7 @@ Use this skill when creating or redesigning a repository's local Pi foundation.
 
 - Foundation is clearly repo-specific.
 - Local config is explicit and narrow.
+- **Persona artifacts (`.pi/persona.md` + AGENTS.md) provide clear local identity and standards.**
 - Workflow supports explore -> design -> implement -> review.
 - Instructions are high-signal and not procedurally bloated.
 - Artifacts are understandable by a new operator in one read.
@@ -49,7 +52,7 @@ Use this skill when creating or redesigning a repository's local Pi foundation.
 ```markdown
 ## Repo Signals
 ## Adopt / Bridge / Ignore Decisions
-## Proposed Local Pi Foundation
+## Proposed Local Pi Foundation (including `.pi/persona.md` + AGENTS.md persona)
 ## Risks and Safeguards
 ## Why this is the minimal high-leverage setup
 ```

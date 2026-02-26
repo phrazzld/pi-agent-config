@@ -11,6 +11,13 @@ const DEFAULT_TONE: DaybookTone = "charismatic";
 export default function daybookExtension(pi: ExtensionAPI): void {
   let state: DaybookState = { tone: DEFAULT_TONE };
 
+  pi.registerCommand("daybook", {
+    description: "Show daybook status",
+    handler: async (_args, ctx) => {
+      ctx.ui.notify(`Daybook mode active. Tone: ${state.tone}`, "info");
+    },
+  });
+
   pi.registerCommand("daybook-tone", {
     description: "Set daybook tone. Usage: /daybook-tone charismatic|calm|coach",
     handler: async (args, ctx) => {
