@@ -4,7 +4,7 @@ set -euo pipefail
 RUNTIME_DIR="${PI_RUNTIME_DIR:-$HOME/.pi/agent}"
 CONFIG_DIR="${PI_CONFIG_DIR:-$HOME/Development/pi-agent-config}"
 ASSETS=(skills extensions agents prompts themes)
-GLOBAL_CONTEXT_LINKS=("context/global/AGENTS.md:AGENTS.md")
+GLOBAL_CONTEXT_LINKS=("context/global/AGENTS.md:AGENTS.md" "context/global/APPEND_SYSTEM.md:APPEND_SYSTEM.md")
 
 mkdir -p "$RUNTIME_DIR"
 

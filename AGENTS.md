@@ -10,6 +10,16 @@ Do not use it as the global baseline for all Pi sessions.
 Global cross-repo context belongs in:
 - `context/global/AGENTS.md` (synced to `~/.pi/agent/AGENTS.md` by `scripts/bootstrap.sh`)
 
+
+## Prompt layers in this repo
+
+Global/runtime prompt artifacts are versioned here:
+- `context/global/AGENTS.md` → `~/.pi/agent/AGENTS.md` (cross-repo context contract)
+- `context/global/APPEND_SYSTEM.md` → `~/.pi/agent/APPEND_SYSTEM.md` (system prompt addendum)
+
+Note: `SYSTEM.md` would replace Pi's built-in system prompt entirely.
+Default policy: use `APPEND_SYSTEM.md` for additive global behavior unless a full replacement is explicitly intended.
+
 ## Purpose
 
 This repo is the source-of-truth for global Pi runtime config (`~/.pi/agent`).

@@ -91,7 +91,14 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 ./scripts/bootstrap.sh
 ```
 
-This links runtime assets and `~/.pi/agent/AGENTS.md` (global baseline context).
+This links runtime assets, `~/.pi/agent/AGENTS.md` (global context), and `~/.pi/agent/APPEND_SYSTEM.md` (global system addendum).
+
+## AGENTS vs SYSTEM prompt files
+- `AGENTS.md` files are context files loaded by location (global + parent dirs + repo).
+- `SYSTEM.md` replaces Pi's built-in system prompt (full override; high impact).
+- `APPEND_SYSTEM.md` appends to the built-in system prompt (safer additive policy).
+
+In this repo, global runtime prompt artifacts are versioned under `context/global/` and linked by `scripts/bootstrap.sh`.
 
 ## Discovery Hygiene Defaults
 - Home-level `CLAUDE.md` is retired (avoid broad machine context bleed into every repo).
@@ -171,6 +178,7 @@ See:
 - `docs/incidents/2026-02-25-memory-runaway.md`
 - `docs/orchestration-resilience-options-2026-02-25.md`
 - `docs/opinionated-framework-roadmap.md`
+- `docs/delegated-run-health-model-v1.md`
 - `docs/adr/ADR-0001-orchestration-admission-control.md`
 - `docs/workflow-first-slice-design.md`
 - `docs/autopilot-pipeline.md`

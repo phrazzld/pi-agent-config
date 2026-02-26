@@ -39,6 +39,7 @@ Build a world-class, explicit Pi configuration system with:
 - [ ] Tighten governor defaults (`enforce` where justified) with lower-latency checks for runaway detection.
 - [ ] Add weekly telemetry rollup/aggregation over bounded NDJSON logs.
 - [ ] Define and ship an opinionated Pi framework layer (stable defaults + extension contracts + upgrade lane).
+- [ ] Replace blunt delegated-agent kill switches with progress-health polling and stall-aware recovery.
 
 ## Restart Checklist (next session)
 
@@ -52,6 +53,7 @@ Build a world-class, explicit Pi configuration system with:
 
 ### Now
 
+- [ ] Build unified delegated-runner health model (heartbeat + progress diff + stall classifier + recovery policy).
 - [ ] Run 24h mixed-workload soak with admission state + breaker telemetry review.
 - [ ] Add idempotency key + dedup in orchestration admission path.
 - [ ] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.
@@ -60,6 +62,7 @@ Build a world-class, explicit Pi configuration system with:
 
 ### Next
 
+- [ ] Design an observability hardening workflow agent (headless specialist orchestrator) for logging/error-instrumentation sweeps.
 - [ ] Build autonomous autopilot flywheel runner (nightly bounded backlog chewing).
 - [ ] Add reflection/codification phase between every autopilot run.
 - [ ] Introduce issue eligibility labels (`autopilot/ready`, `autopilot/safe`, `size/s`, `risk/low`).
