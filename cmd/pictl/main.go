@@ -262,6 +262,10 @@ func runTarget(opts globalOptions, targetName string, forwarded []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	spec.Env = append(spec.Env,
+		"PI_WORKFLOW_TARGET="+target.Name,
+		"PI_WORKFLOW_SLICE="+target.Slice,
+	)
 
 	if err := controlplane.LaunchPi(spec); err != nil {
 		return exitCodeForError(err)
@@ -293,6 +297,10 @@ func runSlice(opts globalOptions, sliceName string, forwarded []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	spec.Env = append(spec.Env,
+		"PI_WORKFLOW_TARGET=slice",
+		"PI_WORKFLOW_SLICE="+sliceName,
+	)
 
 	if err := controlplane.LaunchPi(spec); err != nil {
 		return exitCodeForError(err)

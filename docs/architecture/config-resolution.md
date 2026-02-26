@@ -19,6 +19,7 @@ This document defines which config wins and when.
 | Circumstance | Source | Effect |
 |---|---|---|
 | `pictl <target>` | `slices/<target>.json` | selects extension pack |
+| `PI_WORKFLOW_TARGET` / `PI_WORKFLOW_SLICE` | exported by `pictl` launcher | runtime capability scoping (e.g., autopilot pipelines build-only) |
 | `--profile` / `PI_DEFAULT_PROFILE` | `profiles` extension | tool/thinking posture |
 | Orchestration depth > 0 | `PI_ORCH_DEPTH` | delegated-run policy behavior |
 | Repo-local orchestration files present | `<repo>/.pi/agents/{teams,pipelines}.yaml` | local-first team/pipeline resolution |

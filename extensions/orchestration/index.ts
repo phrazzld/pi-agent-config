@@ -18,6 +18,13 @@ import {
 } from "./admission";
 import { loadOrchestrationConfig, type PipelineSpec, type TeamMap, type PipelineMap } from "./config";
 import {
+  buildPipelineCapabilityMessage,
+  isPipelineAllowedForTarget,
+  pipelineTargetScopeHint,
+  resolveWorkflowTarget,
+  type WorkflowTarget,
+} from "./capability-policy";
+import {
   AdaptiveGovernor,
   resolveGovernorPolicy,
   type GovernorMode,
@@ -737,6 +744,13 @@ async function runPipeline(
     onDashboardUpdate: (state: DashboardState) => void;
   },
 ): Promise<PipelineExecutionResult | null> {
+  const workflowTarget = resolveWorkflowTarget(process.env);
+  const capabilityMessage = buildPipelineCapabilityMessage(pipelineName, workflowTarget);
+  if (capabilityMessage) {
+    ctx.ui.notify(capabilityMessage, "warning");
+    return null;
+  }
+
   const { pipelines, warnings, source, baseDir } = loadConfig(ctx.cwd);
   if (warnings.length > 0 && ctx.hasUI) {
     ctx.ui.notify(warnings.join("\n"), "warning");
@@ -1080,7 +1094,7 @@ function formatTeams(teams: TeamMap): string[] {
   return names.map((name) => `- ${name}: ${(teams[name] ?? []).join(", ") || "(empty)"}`);
 }
 
-function formatPipelines(pipelines: PipelineMap): string[] {
+function formatPipelines(pipelines: PipelineMap, workflowTarget: WorkflowTarget = "unknown"): string[] {
   const names = Object.keys(pipelines).sort();
   if (names.length === 0) {
     return ["- (none)"];
@@ -1089,7 +1103,10 @@ function formatPipelines(pipelines: PipelineMap): string[] {
   return names.map((name) => {
     const spec = pipelines[name];
     const stepNames = spec.steps.map((step) => step.agent).join(" -> ");
-    return `- ${name}: ${spec.description ?? "(no description)"} | steps=${spec.steps.length} (${stepNames})`;
+    const scopeHint = pipelineTargetScopeHint(name);
+    const allowed = isPipelineAllowedForTarget(name, workflowTarget);
+    const scopeSuffix = scopeHint ? ` | scope=${scopeHint}${allowed ? "" : " (blocked in this target)"}` : "";
+    return `- ${name}: ${spec.description ?? "(no description)"} | steps=${spec.steps.length} (${stepNames})${scopeSuffix}`;
   });
 }
 

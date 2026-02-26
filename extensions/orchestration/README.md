@@ -98,3 +98,9 @@ Admission knobs:
 - Uses existing subagent agent discovery (`user`, `project`, `both`).
 - Team runs execute members in parallel (bounded concurrency).
 - Pipeline runs execute steps sequentially with `$INPUT` and `$ORIGINAL` substitution.
+
+## Capability scope
+
+- Pipelines matching `autopilot*` are treated as **build-only capabilities**.
+- If launched from non-build targets (`meta`, `ops`, `daybook`), orchestration blocks them with a guidance message.
+- Use `pictl build` before running `/pipeline autopilot-v1 ...`.
