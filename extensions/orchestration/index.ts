@@ -34,6 +34,7 @@ import {
 import { type DelegatedHealthSummary } from "../shared/delegated-health";
 import {
   runDelegatedCommand,
+  type DelegatedRunOutcome,
   type DelegatedRunnerProgressMarker,
 } from "../shared/delegation-runner";
 import {
@@ -44,14 +45,25 @@ import {
   withDelegationCaller,
 } from "../shared/delegation-policy";
 
-import { DEFAULT_RECOVERY_POLICY, classifyRecoveryReason, evaluateRecovery } from "../shared/delegation-recovery";
+import {
+  createQuorumState,
+  DEFAULT_RECOVERY_POLICY,
+  evaluateQuorum,
+  evaluateRecovery,
+  hasLockIssue,
+  classifyRecoveryReason,
+  isSuccessfulOutcome,
+  resolveTaskRecoveryPolicy,
+  sleep,
+  syntheticFailedOutcome,
+  totalAllowedAttempts,
+} from "../shared/delegation-recovery";
 
 const ORCHESTRATION_MESSAGE_TYPE = "orchestration";
 const ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE = "orchestration-synthesis";
 const ORCHESTRATION_WIDGET_PLACEMENT = "aboveEditor" as const;
 const ORCHESTRATION_DASHBOARD_AUTO_CLEAR_MS = 8_000;
 const LOCK_RETRY_MAX_ATTEMPTS = 4;
-const LOCK_RETRY_BASE_DELAY_MS = 120;
 const SYNTHESIS_MAX_OUTPUT_CHARS_PER_MEMBER = 4_000;
 const SYNTHESIS_MAX_TOTAL_CHARS = 28_000;
 const ADMISSION_ERROR_PREFIX = "[orchestration-admission]";
@@ -1261,14 +1273,19 @@ async function runAgentTaskWithConfig(
     maxAttempts?: number;
   },
 ): Promise<AgentRunResult> {
-  const policy = {
+  const policy = resolveTaskRecoveryPolicy(process.env, {
     ...DEFAULT_RECOVERY_POLICY,
-    maxAttempts: options.maxAttempts ?? DEFAULT_RECOVERY_POLICY.maxAttempts,
-  };
+    label: "orchestration",
+    maxAttempts: Math.max(1, options.maxAttempts ?? DEFAULT_RECOVERY_POLICY.maxAttempts),
+    allowDegraded: true,
+    minDegradedOutputLength: 140,
+  });
 
+  const totalAttempts = totalAllowedAttempts(policy);
+  const quorum = createQuorumState(policy);
   let lastResult: AgentRunResult | null = null;
 
-  for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
     const attemptResult = await runAgentTaskAttempt(config, {
       task: options.task,
       cwd: options.cwd,
@@ -1281,8 +1298,33 @@ async function runAgentTaskWithConfig(
     lastResult = attemptResult.result;
     const outcome = attemptResult.outcome;
 
-    const reason = classifyRecoveryReason(outcome);
+    if (isSuccessfulOutcome(outcome)) {
+      const quorumDecision = evaluateQuorum(quorum, lastResult.output, attempt);
+      if (quorumDecision.action === "continue") {
+        continue;
+      }
 
+      if (quorumDecision.output && quorumDecision.output.trim()) {
+        lastResult.output = quorumDecision.output;
+      }
+
+      if (quorumDecision.action === "fail") {
+        lastResult.status = "failed";
+        lastResult.error = quorumDecision.reason;
+        if (!lastResult.output.trim() || lastResult.output === "(no output)") {
+          lastResult.output = `error: ${quorumDecision.reason}`;
+        }
+      } else {
+        lastResult.status = "ok";
+        if (lastResult.error && hasLockIssue(lastResult.error)) {
+          lastResult.error = undefined;
+        }
+      }
+
+      return lastResult;
+    }
+
+    const reason = classifyRecoveryReason(outcome);
     const decision = evaluateRecovery(
       {
         attempt,
@@ -1290,25 +1332,20 @@ async function runAgentTaskWithConfig(
         reason,
         output: lastResult.output,
       },
-      policy
+      policy,
     );
 
-    if (decision.action === "retry" && attempt < policy.maxAttempts) {
-      // Potentially notify UI of retry
+    if (decision.action === "retry") {
       await sleep(decision.delayMs, options.signal);
       continue;
     }
 
     if (decision.action === "complete" && lastResult.status === "failed") {
-      // Degraded completion: treat as ok if it produced output and policy allows it
       lastResult.status = "ok";
-      if (!lastResult.output.trim() || lastResult.output === "(no output)") {
-        lastResult.output = lastResult.error || `degraded completion (${reason})`;
-      }
-    }
-
-    if (lastResult.status === "ok" && lastResult.error && hasLockIssue(lastResult.error)) {
       lastResult.error = undefined;
+      if (!lastResult.output.trim() || lastResult.output === "(no output)") {
+        lastResult.output = `degraded completion (${reason})`;
+      }
     }
 
     return lastResult;
@@ -1336,7 +1373,7 @@ async function runAgentTaskAttempt(
     runGrant?: AdmissionRunGrant;
     signal?: AbortSignal;
   },
-): Promise<{ result: AgentRunResult; outcome: any }> {
+): Promise<{ result: AgentRunResult; outcome: DelegatedRunOutcome }> {
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   if (config.model) {
     args.push("--model", config.model);
@@ -1379,12 +1416,7 @@ async function runAgentTaskAttempt(
         const failure = admissionFailureResult(config, slotDecision);
         return {
           result: failure,
-          outcome: {
-            exitCode: 1,
-            stderr: failure.error || "",
-            aborted: true,
-            health: { status: "aborted", classification: "healthy", noProgressSeconds: 0, noEventSeconds: 0, lastAction: "admission_failure", warningCount: 0, stallEpisodes: 0 },
-          },
+          outcome: syntheticFailedOutcome("admission_failure", failure.error || ""),
         };
       }
       slotGrant = slotDecision.grant;
@@ -1968,49 +2000,6 @@ function truncateMultiline(text: string, maxChars: number): string {
     return normalized;
   }
   return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
-}
-
-function hasLockIssue(...values: Array<string | undefined>): boolean {
-  const joined = values.filter(Boolean).join("\n");
-  if (!joined) {
-    return false;
-  }
-  return /lock file is already being held|elocked/i.test(joined);
-}
-
-function backoffWithJitterMs(attempt: number): number {
-  const exp = Math.max(0, attempt - 1);
-  const base = LOCK_RETRY_BASE_DELAY_MS * 2 ** exp;
-  const jitter = Math.floor(Math.random() * LOCK_RETRY_BASE_DELAY_MS);
-  return Math.min(2_000, base + jitter);
-}
-
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) {
-    return;
-  }
-
-  await new Promise<void>((resolve) => {
-    const timer = setTimeout(() => {
-      if (signal) {
-        signal.removeEventListener("abort", onAbort);
-      }
-      resolve();
-    }, ms);
-
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve();
-    };
-
-    if (signal) {
-      if (signal.aborted) {
-        onAbort();
-        return;
-      }
-      signal.addEventListener("abort", onAbort, { once: true });
-    }
-  });
 }
 
 function resolveRuntimePath(token: string, cwd: string): string {

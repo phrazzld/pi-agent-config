@@ -15,8 +15,20 @@ import {
 import { type DelegatedHealthSummary } from "../shared/delegated-health";
 import {
   runDelegatedCommand,
+  type DelegatedRunOutcome,
   type DelegatedRunnerProgressMarker,
 } from "../shared/delegation-runner";
+import {
+  createQuorumState,
+  DEFAULT_RECOVERY_POLICY,
+  evaluateQuorum,
+  evaluateRecovery,
+  classifyRecoveryReason,
+  isSuccessfulOutcome,
+  resolveTaskRecoveryPolicy,
+  sleep,
+  totalAllowedAttempts,
+} from "../shared/delegation-recovery";
 
 export type ChangeAction = "created" | "updated" | "skipped";
 
@@ -1529,12 +1541,113 @@ async function runPiPrompt(options: {
 
   args.push(options.task);
 
+  const policy = resolveTaskRecoveryPolicy(process.env, {
+    ...DEFAULT_RECOVERY_POLICY,
+    label: `bootstrap:${options.model}`,
+    maxAttempts: Math.max(1, DEFAULT_RECOVERY_POLICY.maxAttempts),
+    allowDegraded: true,
+    minDegradedOutputLength: 200,
+  });
+  const totalAttempts = totalAllowedAttempts(policy);
+  const quorum = createQuorumState(policy);
+
+  let lastOutcome: DelegatedRunOutcome | null = null;
+  let lastOutput = "";
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+    const attemptResult = await runPiPromptAttempt({
+      cwd: options.cwd,
+      args,
+      model: options.model,
+    });
+
+    lastOutcome = attemptResult.outcome;
+    lastOutput = attemptResult.output;
+    lastError = attemptResult.error;
+
+    if (isSuccessfulOutcome(attemptResult.outcome)) {
+      const quorumDecision = evaluateQuorum(quorum, attemptResult.output, attempt);
+      if (quorumDecision.action === "continue") {
+        continue;
+      }
+
+      const elapsedMs = Date.now() - started;
+      if (quorumDecision.action === "fail") {
+        return {
+          ok: false,
+          output: attemptResult.output,
+          error: quorumDecision.reason,
+          elapsedMs,
+          health: attemptResult.outcome.health,
+        };
+      }
+
+      return {
+        ok: true,
+        output: quorumDecision.output ?? attemptResult.output,
+        elapsedMs,
+        health: attemptResult.outcome.health,
+      };
+    }
+
+    const reason = classifyRecoveryReason(attemptResult.outcome);
+    const decision = evaluateRecovery(
+      {
+        attempt,
+        outcome: attemptResult.outcome,
+        reason,
+        output: attemptResult.output,
+      },
+      policy,
+    );
+
+    if (decision.action === "retry") {
+      await sleep(decision.delayMs);
+      continue;
+    }
+
+    const elapsedMs = Date.now() - started;
+
+    if (decision.action === "complete") {
+      return {
+        ok: true,
+        output: attemptResult.output,
+        elapsedMs,
+        health: attemptResult.outcome.health,
+      };
+    }
+
+    return {
+      ok: false,
+      output: attemptResult.output,
+      error: attemptResult.error || decision.reason,
+      elapsedMs,
+      health: attemptResult.outcome.health,
+    };
+  }
+
+  const elapsedMs = Date.now() - started;
+  return {
+    ok: false,
+    output: lastOutput,
+    error: lastError || "delegated retries exhausted",
+    elapsedMs,
+    health: lastOutcome?.health,
+  };
+}
+
+async function runPiPromptAttempt(options: {
+  cwd: string;
+  args: string[];
+  model: string;
+}): Promise<{ output: string; error: string; outcome: DelegatedRunOutcome }> {
   let latestAssistantText = "";
   let stopError = "";
 
   const delegated = await runDelegatedCommand({
     label: `bootstrap:${options.model}`,
-    args,
+    args: options.args,
     cwd: options.cwd,
     env: process.env,
     onStdoutLine: (line) => {
@@ -1569,34 +1682,13 @@ async function runPiPrompt(options: {
     stopError = delegated.abortReason || "delegated run stalled";
   }
 
-  const elapsedMs = Date.now() - started;
   const stderrLine = firstNonEmptyLine(delegated.stderr);
-
-  if (delegated.exitCode !== 0) {
-    return {
-      ok: false,
-      output: latestAssistantText,
-      error: stopError || stderrLine || `pi exited with code ${delegated.exitCode}`,
-      elapsedMs,
-      health: delegated.health,
-    };
-  }
-
-  if (stopError) {
-    return {
-      ok: false,
-      output: latestAssistantText,
-      error: stopError,
-      elapsedMs,
-      health: delegated.health,
-    };
-  }
+  const error = stopError || (delegated.exitCode !== 0 ? stderrLine || `pi exited with code ${delegated.exitCode}` : "");
 
   return {
-    ok: true,
     output: latestAssistantText,
-    elapsedMs,
-    health: delegated.health,
+    error,
+    outcome: delegated,
   };
 }
 

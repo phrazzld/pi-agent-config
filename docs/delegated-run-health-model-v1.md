@@ -113,7 +113,24 @@ Current baseline: shared `extensions/shared/delegation-runner.ts` with common he
 - `PI_DELEGATED_HEALTH_DISABLE_ABORT` (warnings-only mode)
 
 
-## Next hardening layer
+## Recovery policy layer (shipped)
 
-- Add retry/quorum/degraded completion policy hooks on top of the shared delegation runner.
-- Add focused integration tests for stalled single-tool-call delegated runs and bounded recovery behavior.
+- ✅ Shared recovery policy hooks now live in `extensions/shared/delegation-recovery.ts`.
+- ✅ Integrated in orchestration, bootstrap lane runner, and subagent delegated execution.
+- ✅ Bounded retries + jittered backoff are policy-driven (`evaluateRecovery`).
+- ✅ Optional quorum aggregation hooks are available (`createQuorumState` + `evaluateQuorum`).
+- ✅ Degraded completion is supported for high-signal partial output when configured.
+
+### Recovery knobs
+
+- `PI_DELEGATED_RECOVERY_MAX_ATTEMPTS`
+- `PI_DELEGATED_RECOVERY_RETRY_ON` (comma-separated reasons)
+- `PI_DELEGATED_RECOVERY_ALLOW_DEGRADED`
+- `PI_DELEGATED_RECOVERY_MIN_DEGRADED_OUTPUT_CHARS`
+- `PI_DELEGATED_RECOVERY_BACKOFF_BASE_MS`
+- `PI_DELEGATED_RECOVERY_BACKOFF_MULTIPLIER`
+- `PI_DELEGATED_RECOVERY_BACKOFF_MAX_MS`
+- `PI_DELEGATED_RECOVERY_QUORUM_ENABLED`
+- `PI_DELEGATED_RECOVERY_QUORUM_MIN_SUCCESSES`
+- `PI_DELEGATED_RECOVERY_QUORUM_MAX_ATTEMPTS`
+- `PI_DELEGATED_RECOVERY_QUORUM_MIN_OUTPUT_CHARS`

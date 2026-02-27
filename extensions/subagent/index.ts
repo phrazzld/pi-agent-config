@@ -16,6 +16,7 @@ import {
 import { type DelegatedHealthSummary } from "../shared/delegated-health";
 import {
   runDelegatedCommand,
+  type DelegatedRunOutcome,
   type DelegatedRunnerProgressMarker,
 } from "../shared/delegation-runner";
 import {
@@ -29,6 +30,19 @@ import {
   resolveDelegationCaller,
   withDelegationCaller,
 } from "../shared/delegation-policy";
+
+import {
+  createQuorumState,
+  DEFAULT_RECOVERY_POLICY,
+  evaluateQuorum,
+  evaluateRecovery,
+  classifyRecoveryReason,
+  hasLockIssue,
+  isSuccessfulOutcome,
+  resolveTaskRecoveryPolicy,
+  sleep,
+  totalAllowedAttempts,
+} from "../shared/delegation-recovery";
 
 const MAX_PARALLEL_TASKS = 8;
 const MAX_PARALLEL_CONCURRENCY = 4;
@@ -601,7 +615,7 @@ async function runSingleAgent(options: RunSingleAgentOptions): Promise<SingleRes
     if (agent.systemPrompt.trim()) {
       const promptFile = createTempPromptFile(
         agent.name,
-        appendSubagentExecutionContract(agent.systemPrompt, guardrailBudget)
+        appendSubagentExecutionContract(agent.systemPrompt, guardrailBudget),
       );
       promptDir = promptFile.dir;
       args.push("--append-system-prompt", promptFile.filePath);
@@ -609,110 +623,208 @@ async function runSingleAgent(options: RunSingleAgentOptions): Promise<SingleRes
 
     args.push(`Task: ${options.task}`);
 
-    const result: SingleResult = {
-      ...emptyResult(agent.name, options.task),
-      agentSource: agent.source,
-      exitCode: 0,
-      step: options.step,
-      model: agent.model,
-      configuredModel: agent.model,
-      configuredTools: agent.tools,
-      maxTurns: guardrailBudget.maxTurns,
-      maxRuntimeSeconds: guardrailBudget.maxRuntimeSeconds,
-    };
-
-    let observedToolExecutionEvents = false;
-
-    const updateProgress = () => {
-      result.lastUpdateAtMs = Date.now();
-      result.elapsedMs = Math.max(0, result.lastUpdateAtMs - result.startedAtMs);
-      options.onUpdate?.(result);
-    };
-
-    updateProgress();
-
-    const delegated = await runDelegatedCommand({
-      label: `subagent:${agent.name}:${Date.now()}`,
-      args,
-      cwd: options.cwd ?? options.defaultCwd,
-      env: withDelegationCaller(process.env, "subagent"),
-      signal: options.signal,
-      runtimeLimitSeconds: guardrailBudget.maxRuntimeSeconds,
-      tickIntervalMs: 1_000,
-      onTick: updateProgress,
-      watchdogs: guardrailBudget.maxTurns
-        ? [
-            {
-              intervalMs: 500,
-              origin: "budget",
-              evaluate: () =>
-                result.usage.turns >= (guardrailBudget.maxTurns ?? 0)
-                  ? `turn budget exceeded (${guardrailBudget.maxTurns})`
-                  : undefined,
-            },
-          ]
-        : undefined,
-      onStdoutLine: (line) => {
-        const marker = applySubagentEventLine(line, {
-          result,
-          observedToolExecutionEvents,
-          onObservedToolExecution: () => {
-            observedToolExecutionEvents = true;
-          },
-        });
-
-        if (!marker) {
-          return;
-        }
-
-        updateProgress();
-        const runnerMarker: DelegatedRunnerProgressMarker = {
-          ...marker,
-          fingerprint: buildSubagentProgressFingerprint(result),
-        };
-
-        return { marker: runnerMarker };
-      },
-      onStderr: (text) => {
-        result.stderr += text;
-        const trimmed = text.trim();
-        if (trimmed) {
-          result.lastAction = `stderr: ${trimmed.split("\n").at(-1)?.slice(0, 120) ?? trimmed.slice(0, 120)}`;
-          updateProgress();
-        }
-      },
+    const policy = resolveTaskRecoveryPolicy(process.env, {
+      ...DEFAULT_RECOVERY_POLICY,
+      label: `subagent:${agent.name}`,
+      maxAttempts: Math.max(1, DEFAULT_RECOVERY_POLICY.maxAttempts),
+      allowDegraded: true,
+      minDegradedOutputLength: 120,
     });
+    const totalAttempts = totalAllowedAttempts(policy);
+    const quorum = createQuorumState(policy);
 
-    result.exitCode = delegated.exitCode;
-    result.lastUpdateAtMs = Date.now();
-    result.elapsedMs = Math.max(0, result.lastUpdateAtMs - result.startedAtMs);
-    result.health = delegated.health;
+    let lastResult: SingleResult | null = null;
 
-    if (!result.stderr && delegated.stderr) {
-      result.stderr = delegated.stderr;
-    }
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+      const attemptResult = await runSingleAgentAttempt({
+        options,
+        agent,
+        guardrailBudget,
+        args,
+      });
 
-    if (delegated.aborted) {
-      result.stopReason = "aborted";
-      if (!result.errorMessage) {
-        result.errorMessage = delegated.abortReason ?? "Subagent aborted by parent signal.";
+      const result = attemptResult.result;
+      lastResult = result;
+      const output = getFinalOutput(result.messages);
+
+      if (isSuccessfulOutcome(attemptResult.outcome)) {
+        const quorumDecision = evaluateQuorum(quorum, output, attempt);
+        if (quorumDecision.action === "continue") {
+          continue;
+        }
+
+        if (quorumDecision.action === "fail") {
+          result.exitCode = 1;
+          result.errorMessage = quorumDecision.reason;
+          result.stopReason = "error";
+        } else if (result.errorMessage && hasLockIssue(result.errorMessage, result.stderr)) {
+          result.errorMessage = undefined;
+        }
+
+        return result;
       }
+
+      const reason = classifyRecoveryReason(attemptResult.outcome);
+      const decision = evaluateRecovery(
+        {
+          attempt,
+          outcome: attemptResult.outcome,
+          reason,
+          output,
+        },
+        policy,
+      );
+
+      if (decision.action === "retry") {
+        await sleep(decision.delayMs, options.signal);
+        continue;
+      }
+
+      if (decision.action === "complete") {
+        result.exitCode = 0;
+        result.stopReason = "degraded";
+        result.errorMessage = undefined;
+        return result;
+      }
+
+      return result;
     }
 
-    if (delegated.abortOrigin === "health" && !result.errorMessage) {
-      result.errorMessage = "delegated run stalled";
-    }
-
-    if (result.exitCode !== 0 && !result.errorMessage) {
-      result.errorMessage = firstNonEmptyLine(result.stderr) ?? `exit code ${result.exitCode}`;
-    }
-
-    return result;
+    return (
+      lastResult ?? {
+        ...emptyResult(agent.name, options.task),
+        agentSource: agent.source,
+        exitCode: 1,
+        errorMessage: "delegated retries exhausted",
+        step: options.step,
+      }
+    );
   } finally {
     if (promptDir) {
       rmSync(promptDir, { recursive: true, force: true });
     }
   }
+}
+
+async function runSingleAgentAttempt(input: {
+  options: RunSingleAgentOptions;
+  agent: AgentConfig;
+  guardrailBudget: GuardrailBudget;
+  args: string[];
+}): Promise<{ result: SingleResult; outcome: DelegatedRunOutcome }> {
+  const { options, agent, guardrailBudget, args } = input;
+
+  const result: SingleResult = {
+    ...emptyResult(agent.name, options.task),
+    agentSource: agent.source,
+    exitCode: 0,
+    step: options.step,
+    model: agent.model,
+    configuredModel: agent.model,
+    configuredTools: agent.tools,
+    maxTurns: guardrailBudget.maxTurns,
+    maxRuntimeSeconds: guardrailBudget.maxRuntimeSeconds,
+  };
+
+  let observedToolExecutionEvents = false;
+
+  const updateProgress = () => {
+    result.lastUpdateAtMs = Date.now();
+    result.elapsedMs = Math.max(0, result.lastUpdateAtMs - result.startedAtMs);
+    options.onUpdate?.(result);
+  };
+
+  updateProgress();
+
+  const delegated = await runDelegatedCommand({
+    label: `subagent:${agent.name}:${Date.now()}`,
+    args,
+    cwd: options.cwd ?? options.defaultCwd,
+    env: withDelegationCaller(process.env, "subagent"),
+    signal: options.signal,
+    runtimeLimitSeconds: guardrailBudget.maxRuntimeSeconds,
+    tickIntervalMs: 1_000,
+    onTick: updateProgress,
+    watchdogs: guardrailBudget.maxTurns
+      ? [
+          {
+            intervalMs: 500,
+            origin: "budget",
+            evaluate: () =>
+              result.usage.turns >= (guardrailBudget.maxTurns ?? 0)
+                ? `turn budget exceeded (${guardrailBudget.maxTurns})`
+                : undefined,
+          },
+        ]
+      : undefined,
+    onStdoutLine: (line) => {
+      const marker = applySubagentEventLine(line, {
+        result,
+        observedToolExecutionEvents,
+        onObservedToolExecution: () => {
+          observedToolExecutionEvents = true;
+        },
+      });
+
+      if (!marker) {
+        return;
+      }
+
+      updateProgress();
+      const runnerMarker: DelegatedRunnerProgressMarker = {
+        ...marker,
+        fingerprint: buildSubagentProgressFingerprint(result),
+      };
+
+      return { marker: runnerMarker };
+    },
+    onStderr: (text) => {
+      result.stderr += text;
+      const trimmed = text.trim();
+      if (trimmed) {
+        result.lastAction = `stderr: ${trimmed.split("\n").at(-1)?.slice(0, 120) ?? trimmed.slice(0, 120)}`;
+        updateProgress();
+      }
+    },
+  });
+
+  result.exitCode = delegated.exitCode;
+  result.lastUpdateAtMs = Date.now();
+  result.elapsedMs = Math.max(0, result.lastUpdateAtMs - result.startedAtMs);
+  result.health = delegated.health;
+
+  if (!result.stderr && delegated.stderr) {
+    result.stderr = delegated.stderr;
+  }
+
+  if (delegated.aborted) {
+    result.stopReason = "aborted";
+    if (!result.errorMessage) {
+      result.errorMessage = delegated.abortReason ?? "Subagent aborted by parent signal.";
+    }
+  }
+
+  if (delegated.abortOrigin === "health" && !result.errorMessage) {
+    result.errorMessage = "delegated run stalled";
+  }
+
+  if (result.exitCode !== 0 && !result.errorMessage) {
+    result.errorMessage = firstNonEmptyLine(result.stderr) ?? `exit code ${result.exitCode}`;
+  }
+
+  if (result.exitCode !== 0 && !result.errorMessage) {
+    result.errorMessage = "delegated run failed";
+  }
+
+  const output = getFinalOutput(result.messages);
+  if (!output && !result.errorMessage) {
+    result.errorMessage = "no output";
+  }
+
+  return {
+    result,
+    outcome: delegated,
+  };
 }
 
 interface SubagentProgressMarker {
