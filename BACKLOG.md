@@ -56,6 +56,7 @@ Build a world-class, explicit Pi configuration system with:
 - [x] Complete execution-engine unification by extracting shared `extensions/shared/delegation-runner.ts` across subagent/orchestration/bootstrap (common spawn lifecycle + health envelope).
 - [x] Add delegated-run recovery policy hooks (retry-once/quorum/degraded completion) on top of shared delegation-runner.
 - [ ] Run 24h mixed-workload soak with admission state + breaker telemetry review.
+- [x] Ship repeatable soak tooling (`scripts/soak/*`, analyzer, playbook) and validate via smoke run.
 - [x] Add idempotency key + dedup in orchestration admission path.
 - [ ] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.
 - [ ] Add top-level-only telemetry mode for heavy extensions during delegated depth (`PI_ORCH_DEPTH > 0`).
