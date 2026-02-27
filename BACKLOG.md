@@ -54,7 +54,7 @@ Build a world-class, explicit Pi configuration system with:
 ### Now
 
 - [x] Complete execution-engine unification by extracting shared `extensions/shared/delegation-runner.ts` across subagent/orchestration/bootstrap (common spawn lifecycle + health envelope).
-- [ ] Add delegated-run recovery policy hooks (retry-once/quorum/degraded completion) on top of shared delegation-runner.
+- [x] Add delegated-run recovery policy hooks (retry-once/quorum/degraded completion) on top of shared delegation-runner.
 - [ ] Run 24h mixed-workload soak with admission state + breaker telemetry review.
 - [x] Add idempotency key + dedup in orchestration admission path.
 - [ ] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.
@@ -75,6 +75,10 @@ Build a world-class, explicit Pi configuration system with:
 - [ ] Prospecting + outreach flywheel for SMB website/software opportunities.
 - [ ] Automated business dossier + branded outreach artifact generation pipeline.
 - [ ] Optional multi-tenant artifact hosting (e.g. `<target>.mistystep.io`) for demos.
+
+## Bootstrap Flow Improvements
+
+- [ ] **Consolidate persona into AGENTS.md**: Current bootstrap creates separate `.pi/persona.md` file. Should instead embed persona identity + operational rules directly into unified `AGENTS.md` at repo root. Persona belongs front-and-center, not hidden in dot-directory. See scry repo discussion 2026-02-27.
 
 ## Platform Direction — Opinionated Pi Framework (proposal)
 
