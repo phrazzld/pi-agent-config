@@ -74,12 +74,17 @@ if [[ -n "$PRESSURE_WARN_MS" ]]; then
   extra_args+=(--pressure-warn-ms "$PRESSURE_WARN_MS")
 fi
 
-bun run scripts/soak/mixed-workload-soak.ts \
-  --duration "$DURATION" \
-  --out "$OUT_DIR" \
-  --snapshot-ms "$SNAPSHOT_MS" \
-  --loop-delay-ms "$LOOP_DELAY_MS" \
-  "${extra_args[@]}"
+cmd=(
+  bun run scripts/soak/mixed-workload-soak.ts
+  --duration "$DURATION"
+  --out "$OUT_DIR"
+  --snapshot-ms "$SNAPSHOT_MS"
+  --loop-delay-ms "$LOOP_DELAY_MS"
+)
+if [[ ${#extra_args[@]} -gt 0 ]]; then
+  cmd+=("${extra_args[@]}")
+fi
+"${cmd[@]}"
 
 REPORT_PATH="$OUT_DIR/soak-report.md"
 python3 scripts/soak/analyze-soak-telemetry.py --dir "$OUT_DIR" --out "$REPORT_PATH" >/dev/null
