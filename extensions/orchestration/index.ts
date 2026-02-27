@@ -44,6 +44,8 @@ import {
   withDelegationCaller,
 } from "../shared/delegation-policy";
 
+import { DEFAULT_RECOVERY_POLICY, classifyRecoveryReason, evaluateRecovery } from "../shared/delegation-recovery";
+
 const ORCHESTRATION_MESSAGE_TYPE = "orchestration";
 const ORCHESTRATION_SYNTHESIS_MESSAGE_TYPE = "orchestration-synthesis";
 const ORCHESTRATION_WIDGET_PLACEMENT = "aboveEditor" as const;
@@ -1962,6 +1964,11 @@ function truncateMultiline(text: string, maxChars: number): string {
   if (!normalized) {
     return "(no output)";
   }
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
+}
 
 function hasLockIssue(...values: Array<string | undefined>): boolean {
   const joined = values.filter(Boolean).join("\n");
