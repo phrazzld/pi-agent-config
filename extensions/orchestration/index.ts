@@ -1962,16 +1962,26 @@ function truncateMultiline(text: string, maxChars: number): string {
   if (!normalized) {
     return "(no output)";
   }
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
-}
 
+function hasLockIssue(...values: Array<string | undefined>): boolean {
+  const joined = values.filter(Boolean).join("\n");
+  if (!joined) {
+    return false;
+  }
   return /lock file is already being held|elocked/i.test(joined);
 }
 
+function backoffWithJitterMs(attempt: number): number {
+  const exp = Math.max(0, attempt - 1);
+  const base = LOCK_RETRY_BASE_DELAY_MS * 2 ** exp;
+  const jitter = Math.floor(Math.random() * LOCK_RETRY_BASE_DELAY_MS);
+  return Math.min(2_000, base + jitter);
+}
 
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    return;
+  }
 
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
