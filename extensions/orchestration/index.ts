@@ -1259,10 +1259,14 @@ async function runAgentTaskWithConfig(
     maxAttempts?: number;
   },
 ): Promise<AgentRunResult> {
-  const maxAttempts = Math.max(1, options.maxAttempts ?? 1);
+  const policy = {
+    ...DEFAULT_RECOVERY_POLICY,
+    maxAttempts: options.maxAttempts ?? DEFAULT_RECOVERY_POLICY.maxAttempts,
+  };
+
   let lastResult: AgentRunResult | null = null;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  for (let attempt = 1; attempt <= policy.maxAttempts; attempt++) {
     const attemptResult = await runAgentTaskAttempt(config, {
       task: options.task,
       cwd: options.cwd,
@@ -1273,22 +1277,39 @@ async function runAgentTaskWithConfig(
     });
 
     lastResult = attemptResult.result;
+    const outcome = attemptResult.outcome;
 
-    const lockIssue = hasLockIssue(attemptResult.stderr, attemptResult.result.error, attemptResult.result.output);
-    const noMeaningfulOutput = !attemptResult.result.output.trim() || attemptResult.result.output === "(no output)";
-    const shouldRetry = lockIssue && (attemptResult.result.status === "failed" || noMeaningfulOutput);
+    const reason = classifyRecoveryReason(outcome);
 
-    if (shouldRetry && attempt < maxAttempts) {
-      const delayMs = backoffWithJitterMs(attempt);
-      await sleep(delayMs, options.signal);
+    const decision = evaluateRecovery(
+      {
+        attempt,
+        outcome,
+        reason,
+        output: lastResult.output,
+      },
+      policy
+    );
+
+    if (decision.action === "retry" && attempt < policy.maxAttempts) {
+      // Potentially notify UI of retry
+      await sleep(decision.delayMs, options.signal);
       continue;
     }
 
-    if (attemptResult.result.status === "ok" && attemptResult.result.error && hasLockIssue(attemptResult.result.error)) {
-      attemptResult.result.error = undefined;
+    if (decision.action === "complete" && lastResult.status === "failed") {
+      // Degraded completion: treat as ok if it produced output and policy allows it
+      lastResult.status = "ok";
+      if (!lastResult.output.trim() || lastResult.output === "(no output)") {
+        lastResult.output = lastResult.error || `degraded completion (${reason})`;
+      }
     }
 
-    return attemptResult.result;
+    if (lastResult.status === "ok" && lastResult.error && hasLockIssue(lastResult.error)) {
+      lastResult.error = undefined;
+    }
+
+    return lastResult;
   }
 
   return (
@@ -1296,8 +1317,8 @@ async function runAgentTaskWithConfig(
       agent: config.name,
       source: config.source,
       status: "failed",
-      output: "error: lock contention retries exhausted",
-      error: "lock contention retries exhausted",
+      output: "error: retries exhausted",
+      error: "retries exhausted",
       usage: emptyUsage(),
     }
   );
@@ -1313,7 +1334,7 @@ async function runAgentTaskAttempt(
     runGrant?: AdmissionRunGrant;
     signal?: AbortSignal;
   },
-): Promise<{ result: AgentRunResult; stderr: string }> {
+): Promise<{ result: AgentRunResult; outcome: any }> {
   const args: string[] = ["--mode", "json", "-p", "--no-session"];
   if (config.model) {
     args.push("--model", config.model);
@@ -1353,9 +1374,15 @@ async function runAgentTaskAttempt(
         agent: config.name,
       });
       if (!slotDecision.ok) {
+        const failure = admissionFailureResult(config, slotDecision);
         return {
-          result: admissionFailureResult(config, slotDecision),
-          stderr: "",
+          result: failure,
+          outcome: {
+            exitCode: 1,
+            stderr: failure.error || "",
+            aborted: true,
+            health: { status: "aborted", classification: "healthy", noProgressSeconds: 0, noEventSeconds: 0, lastAction: "admission_failure", warningCount: 0, stallEpisodes: 0 },
+          },
         };
       }
       slotGrant = slotDecision.grant;
@@ -1430,7 +1457,7 @@ async function runAgentTaskAttempt(
         result.output = result.error ? `error: ${result.error}` : "(no output)";
       }
 
-      return { result, stderr: delegated.stderr };
+      return { result, outcome: delegated };
     } finally {
       if (slotGrant && options.admission) {
         await options.admission.releaseSlot(
@@ -1941,25 +1968,10 @@ function truncateMultiline(text: string, maxChars: number): string {
   return `${normalized.slice(0, Math.max(1, maxChars - 1)).trimEnd()}…`;
 }
 
-function hasLockIssue(...values: Array<string | undefined>): boolean {
-  const joined = values.filter(Boolean).join("\n");
-  if (!joined) {
-    return false;
-  }
   return /lock file is already being held|elocked/i.test(joined);
 }
 
-function backoffWithJitterMs(attempt: number): number {
-  const exp = Math.max(0, attempt - 1);
-  const base = LOCK_RETRY_BASE_DELAY_MS * 2 ** exp;
-  const jitter = Math.floor(Math.random() * LOCK_RETRY_BASE_DELAY_MS);
-  return Math.min(2_000, base + jitter);
-}
 
-async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (ms <= 0) {
-    return;
-  }
 
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
