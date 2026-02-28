@@ -21,11 +21,12 @@ Purpose: provide at least one concrete, reusable example for each major Pi primi
 ## Teams (declarative)
 
 - `agents/teams.yaml`
-  - `core`, `delivery`, `autopilot`, `meta-council`
+  - `core`, `delivery`, `autopilot`, `meta-council`, `qa-smoke`
 
 Run example:
 ```bash
 /team meta-council "Improve Pi extension architecture and observability"
+/team qa-smoke "Run smoke QA on localhost:3100 and return report artifacts"
 ```
 
 ## Pipelines (declarative)
@@ -36,10 +37,12 @@ Run example:
   - `meta-council-v1`
   - `meta-refactor-v1`
   - `autopilot-v1`
+  - `qa-smoke-v1`
 
 Run example:
 ```bash
 /pipeline software-delivery-v1 "Implement feature X"
+/pipeline qa-smoke-v1 "Smoke test local app on http://localhost:3100 and report findings"
 ```
 
 ## Orchestration UI
@@ -64,6 +67,14 @@ Run example:
 - Commands:
   - `/daybook-tone`
   - `/daybook-kickoff`
+
+## QA smoke posture
+
+- Skill: `skills/qa-smoke/SKILL.md`
+- Prompt template: `prompts/qa-smoke.md`
+- Team: `qa-smoke`
+- Pipeline: `qa-smoke-v1`
+- Goal: prefer repo-native QA smoke command, fallback to direct browser automation, always return artifact paths.
 
 ## Bootstrap pattern (meta -> repo-local)
 

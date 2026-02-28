@@ -142,6 +142,8 @@ async function main(): Promise<void> {
     }
 
     const scenario = selectScenario(iteration);
+    const scenarioTool = scenarioToolName(scenario);
+    await controller.recordToolCall(scenarioTool);
     try {
       await runScenario(controller, scenario, files.workloadLog);
       counters[`scenario:${scenario}`] = (counters[`scenario:${scenario}`] ?? 0) + 1;
@@ -155,6 +157,8 @@ async function main(): Promise<void> {
           error: error instanceof Error ? error.message : String(error),
         },
       });
+    } finally {
+      await controller.recordToolResult(scenarioTool);
     }
 
     await sleep(options.loopDelayMs);
@@ -308,12 +312,25 @@ function selectScenario(iteration: number):
   | "burst_slots"
   | "depth_probe"
   | "gap_probe" {
+  if (iteration > 0 && iteration % 300 === 0) {
+    return "gap_probe";
+  }
+
   const lane = iteration % 10;
   if (lane === 0 || lane === 6) return "burst_slots";
   if (lane === 3) return "depth_probe";
-  if (lane === 8) return "gap_probe";
   if (lane % 2 === 0) return "normal_pipeline";
   return "normal_team";
+}
+
+
+function scenarioToolName(
+  scenario: "normal_team" | "normal_pipeline" | "burst_slots" | "depth_probe" | "gap_probe",
+): "team_run" | "pipeline_run" {
+  if (scenario === "normal_pipeline") {
+    return "pipeline_run";
+  }
+  return "team_run";
 }
 
 async function runScenario(
@@ -364,21 +381,26 @@ async function runScenario(
       return;
     }
     case "gap_probe": {
-      await controller.recordToolCall("team_run");
-      await controller.recordToolCall("team_run");
-      await controller.recordToolCall("team_run");
+      const burst = Math.min(64, controller.getPolicy().maxCallResultGap + 2);
+      for (let index = 0; index < burst; index++) {
+        await controller.recordToolCall("team_run");
+      }
       const decision = await controller.preflightRun({
         runId: `gap:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`,
         kind: "team_run",
         depth: 0,
         requestedParallelism: 1,
       });
+      for (let index = 0; index < burst; index++) {
+        await controller.recordToolResult("team_run");
+      }
       await writeWorkload(workloadPath, {
         ts: Date.now(),
         kind: "gap_probe",
         detail: {
           ok: decision.ok,
           rejection: decision.ok ? undefined : decision.code,
+          burst,
         },
       });
       return;
@@ -461,7 +483,6 @@ async function executeRunScenario(
     },
   });
 
-  await controller.recordToolResult(input.kind);
 }
 
 async function writeWorkload(filePath: string, event: WorkloadEvent): Promise<void> {

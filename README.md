@@ -42,11 +42,13 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `skills/skill-builder`: proactive extraction of reusable workflows into skills
 - `skills/agentic-bootstrap`: synthesis-first repository bootstrap design patterns (model routing + success-criteria-driven artifacts)
 - `skills/sysadmin-ops`: host incident triage + containment + hardening workflow
-- curated external skill bridges (symlinked from `~/.agents/skills`):
-  - `agent-browser`, `dogfood`
-  - `design-taste-frontend`, `web-design-guidelines`
-  - `vercel-react-best-practices`, `vercel-composition-patterns`
-  - `skill-creator`
+- `skills/qa-smoke`: repeatable browser smoke QA workflow (tmux local server + evidence contract)
+- curated external skill bridges (symlinked from `~/.agents/skills` and `~/.claude/skills`):
+  - QA/browser: `agent-browser`, `dogfood`, `webapp-testing`, `browser-use`, `audit-website`
+  - planning/design: `backlog`, `groom`, `design`, `design-audit`, `design-taste-frontend`, `web-design-guidelines`
+  - product growth: `marketing-dashboard`, `marketing-ops`
+  - frontend architecture: `vercel-react-best-practices`, `vercel-composition-patterns`
+  - meta: `skill-creator`
 
 ## Included Workflow Prompts
 - `/execute`
@@ -58,6 +60,7 @@ Backlog of record: [`BACKLOG.md`](./BACKLOG.md) (GitHub Issues retired for this 
 - `/polish`
 - `/fix-ci`
 - `/groom`
+- `/qa-smoke`
 - `/autopilot`
 - `/reflect`
 - `/daybook`

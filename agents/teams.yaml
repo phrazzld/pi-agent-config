@@ -58,3 +58,8 @@ ops-response:
   - sysadmin-sentinel
   - planner
   - reviewer
+
+qa-smoke:
+  - scout
+  - worker
+  - reviewer

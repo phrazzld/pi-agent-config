@@ -124,3 +124,16 @@ meta-refactor-v1:
       prompt: "Execute the approved refactor with focused scope and regression tests:\n\n$INPUT"
     - agent: reviewer
       prompt: "Run merge-readiness review for correctness, reliability, and complexity reduction claims:\n\n$INPUT"
+
+qa-smoke-v1:
+  description: "Smoke QA/UAT loop with evidence artifacts for local or deployed web apps"
+  checkpoints:
+    - before-run
+    - after-findings
+  steps:
+    - agent: scout
+      prompt: "Identify target URL, scope boundaries (unauthenticated/authenticated), and required credentials/artifacts for this QA run:\n\n$INPUT"
+    - agent: worker
+      prompt: "Execute a smoke QA run using repo-native QA commands when available (fallback to agent-browser flow), collect report/screenshot artifacts, and summarize findings:\n\n$INPUT"
+    - agent: reviewer
+      prompt: "Review the QA report for evidence quality, reproducibility, and severity classification clarity:\n\n$INPUT"
