@@ -13,6 +13,7 @@ Goal: execute the requested task end-to-end with minimal scope creep.
 Constraints:
 - Keep patches focused.
 - Run relevant verification.
+- For browser QA tasks, prefer repo-native smoke commands before custom automation; always return artifact paths.
 - Report residual risk explicitly.
 - Emit periodic progress lines: `STATUS: <what changed> | next: <next action>`.
 
