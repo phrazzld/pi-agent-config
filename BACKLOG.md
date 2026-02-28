@@ -81,6 +81,15 @@ Build a world-class, explicit Pi configuration system with:
 
 - [ ] **Consolidate persona into AGENTS.md**: Current bootstrap creates separate `.pi/persona.md` file. Should instead embed persona identity + operational rules directly into unified `AGENTS.md` at repo root. Persona belongs front-and-center, not hidden in dot-directory. See scry repo discussion 2026-02-27.
 
+## External Capability Intake (agent-stuff scan 2026-02-27)
+
+- [ ] **Adopt** `frontend-design` skill into `skills/design-taste-frontend/SKILL.md` (port + align with repo conventions).
+- [ ] **Adopt (optional theme)** `nightowl` theme under `themes/` and evaluate a `rose-pine` sibling for final default recommendation.
+- [ ] **Pilot** `session-breakdown` extension in `meta`/`daybook` slices only (non-default baseline) and collect usability + perf feedback.
+- [ ] **Borrow patterns** from `context.ts` into existing `visibility` extension (`/visibility context` / context-window + loaded-context signals) instead of adding a duplicate extension.
+- [ ] **Design optional pack** for `review` + `todos` + `prompt-editor` + `whimsical` (explicitly non-baseline) with command namespacing and safety policy.
+- [ ] **Gate before adoption**: command-collision audit (`/review`, `/mode`, `/context`) + branch mutation guardrails + todo lock/GC stress tests.
+
 ## Platform Direction — Opinionated Pi Framework (proposal)
 
 Goal: evolve `pi-agent-config` from loose config pack into a stable, opinionated framework on top of bare Pi core.
