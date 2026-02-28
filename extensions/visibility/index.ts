@@ -7,6 +7,7 @@ import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-age
 import { Text, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 import { appendLineWithRotation } from "../shared/log-rotation";
+import { currentOrchestrationDepth, isTopLevelTelemetryEnabled } from "../shared/depth-telemetry";
 
 interface UsageStats {
   tools: Map<string, number>;
@@ -29,6 +30,7 @@ interface RuntimeInventory {
 }
 
 const LOG_FILE_NAME = "primitive-usage.ndjson";
+const ENABLE_NESTED_VISIBILITY_ENV = "PI_VISIBILITY_ENABLE_NESTED";
 const WIDGET_ID = "visibility";
 const MESSAGE_TYPE = "visibility-summary";
 const EMIT_RUN_SUMMARY = false;
@@ -85,8 +87,14 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
 
   let lastModel = "unknown";
   let liveWidgetEnabled = false;
+  let telemetryEnabled = true;
 
   const refreshUi = (ctx: ExtensionContext): void => {
+    if (!telemetryEnabled) {
+      ctx.ui.setWidget(WIDGET_ID, undefined);
+      return;
+    }
+
     if (liveWidgetEnabled) {
       renderVisibilityWidget(ctx, state, inventory, lastModel);
     } else {
@@ -125,6 +133,11 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
     handler: async (args, ctx) => {
       const mode = args.trim().toLowerCase();
       if (mode === "on") {
+        if (!telemetryEnabled) {
+          const depth = currentOrchestrationDepth(process.env);
+          ctx.ui.notify(`Visibility telemetry disabled at depth=${depth}. Set ${ENABLE_NESTED_VISIBILITY_ENV}=true to enable in delegated runs.`, "info");
+          return;
+        }
         liveWidgetEnabled = true;
         refreshUi(ctx);
         ctx.ui.notify("Visibility widget enabled.", "info");
@@ -139,7 +152,7 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
       }
 
       if (mode === "config" || mode === "active") {
-        const snapshot = await buildConfigSnapshot(pi, ctx, inventory);
+        const snapshot = await buildConfigSnapshot(pi, ctx, inventory, telemetryEnabled);
         ctx.ui.notify(snapshot, "info");
         return;
       }
@@ -158,6 +171,9 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
+    const depth = currentOrchestrationDepth(process.env);
+    telemetryEnabled = isTopLevelTelemetryEnabled(ENABLE_NESTED_VISIBILITY_ENV, process.env);
+
     inventory = collectInventory(pi);
     const model = ctx.model;
     if (model) {
@@ -165,17 +181,33 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
       state.models.add(lastModel);
     }
 
+    if (!telemetryEnabled) {
+      if (ctx.hasUI) {
+        ctx.ui.setStatus(WIDGET_ID, `disabled depth=${depth}`);
+      }
+      refreshUi(ctx);
+      return;
+    }
+
     installUnifiedFooter(ctx);
     refreshUi(ctx);
   });
 
   pi.on("model_select", async (event, ctx) => {
+    if (!telemetryEnabled) {
+      return;
+    }
+
     lastModel = `${event.model.provider}/${event.model.id}`;
     state.models.add(lastModel);
     refreshUi(ctx);
   });
 
   pi.on("input", async (event, ctx) => {
+    if (!telemetryEnabled) {
+      return { action: "continue" } as const;
+    }
+
     const command = parseSlashCommand(event.text);
     if (command) {
       incrementMap(state.slashCommands, command, 1);
@@ -189,6 +221,10 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("tool_call", async (event, ctx) => {
+    if (!telemetryEnabled) {
+      return undefined;
+    }
+
     incrementMap(state.tools, event.toolName, 1);
     if (state.inRun) {
       incrementMap(state.runTools, event.toolName, 1);
@@ -209,6 +245,10 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_start", async (_event, ctx) => {
+    if (!telemetryEnabled) {
+      return;
+    }
+
     state.inRun = true;
     state.runStartTs = Date.now();
     state.runTools = new Map();
@@ -218,6 +258,10 @@ export default function visibilityExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_end", async (_event, ctx) => {
+    if (!telemetryEnabled) {
+      return;
+    }
+
     state.totalTurns += 1;
     const durationMs = Math.max(0, Date.now() - state.runStartTs);
     state.inRun = false;
@@ -336,7 +380,12 @@ function buildRunSummary(state: UsageStats, durationMs: number, model: string): 
   ].join(" | ");
 }
 
-async function buildConfigSnapshot(pi: ExtensionAPI, ctx: ExtensionContext, inventory: RuntimeInventory): Promise<string> {
+async function buildConfigSnapshot(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  inventory: RuntimeInventory,
+  telemetryEnabled: boolean,
+): Promise<string> {
   const repoRoot = await detectRepoRoot(pi, ctx.cwd);
   const configDir = getConfigDir();
   const globalSettingsPath = path.join(configDir, "settings.json");
@@ -350,6 +399,7 @@ async function buildConfigSnapshot(pi: ExtensionAPI, ctx: ExtensionContext, inve
   const activeTools = pi.getActiveTools().map((tool) => String(tool)).sort();
   const allTools = pi.getAllTools().map((tool) => tool.name).sort();
   const profileFlag = resolveActiveProfile(pi);
+  const depth = currentOrchestrationDepth(process.env);
 
   const localAgentsDir = path.join(repoRoot, ".pi", "agents");
   const localPromptsDir = path.join(repoRoot, ".pi", "prompts");
@@ -360,6 +410,7 @@ async function buildConfigSnapshot(pi: ExtensionAPI, ctx: ExtensionContext, inve
     `cwd: ${ctx.cwd}`,
     `repo root: ${repoRoot}`,
     `active profile: ${profileFlag}`,
+    `telemetry mode: ${telemetryEnabled ? "enabled" : "disabled"} (depth=${depth}, nestedOptIn=${process.env[ENABLE_NESTED_VISIBILITY_ENV] ? "set" : "unset"})`,
     `active tools: ${activeTools.length}/${allTools.length}`,
     `runtime inventory: ext=${inventory.extensionCommands.length} prompt=${inventory.promptCommands.length} skill=${inventory.skillCommands.length} tool=${inventory.tools.length}`,
     "",
