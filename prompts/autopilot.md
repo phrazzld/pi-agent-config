@@ -20,6 +20,11 @@ Codex-first pattern: draft fast (investigation, implementation, tests, docs), th
 
 Deliver the selected work item (explicit `issue-id` when provided, otherwise highest-priority open issue or `BACKLOG.md` top-priority item) as a draft PR with clean verification evidence.
 
+## Preferred orchestration path
+
+Use pipeline `autopilot-issue-v2` when available. It provides distinct phase agents/models and a bounded verifier fix loop before PR composition.
+If unavailable, follow this prompt manually with the same phase boundaries.
+
 ## Priority Selection (Non-Negotiable)
 
 Always work the highest-priority work item first.

@@ -36,10 +36,12 @@ Run example:
   - `meta-council-v1`
   - `meta-refactor-v1`
   - `autopilot-v1`
+  - `autopilot-issue-v2`
 
 Run example:
 ```bash
 /pipeline software-delivery-v1 "Implement feature X"
+/pipeline autopilot-issue-v2 "Deliver highest-priority ready issue with bounded verifier loop"
 ```
 
 ## Orchestration UI

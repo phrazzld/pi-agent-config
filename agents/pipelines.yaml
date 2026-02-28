@@ -80,6 +80,31 @@ autopilot-v1:
     - agent: reviewer
       prompt: "Final merge-readiness check against the original objective. Confirm blockers resolved or explicitly deferred.\n\nOriginal objective: $ORIGINAL\n\nCurrent state: $INPUT"
 
+autopilot-issue-v2:
+  description: "Issue-to-PR bounded autopilot with distinct phase agents/models and an explicit verifier loop"
+  checkpoints:
+    - after-intake-spec
+    - before-build
+    - before-pr
+    - before-merge
+  steps:
+    - agent: autopilot-intake
+      prompt: "Select and frame one issue for execution. If issue ID is provided, use it; otherwise choose highest-priority open issue by labels/horizon/number.\n\nContext: $INPUT"
+    - agent: autopilot-spec
+      prompt: "Convert intake output into a scoped execution contract with acceptance criteria, test plan, and rollback triggers.\n\n$INPUT"
+    - agent: autopilot-design-critic
+      prompt: "Pressure-test this execution contract. Return blockers, sequencing fixes, and a ready/not-ready verdict.\n\n$INPUT"
+    - agent: autopilot-implementer
+      prompt: "Implement the approved plan with minimal scope. Run focused verification and CI-parity checks relevant to changed files.\n\n$INPUT"
+    - agent: autopilot-verifier
+      prompt: "Run blocking verification. Classify findings by severity and return PASS/FAIL.\n\n$INPUT"
+    - agent: autopilot-implementer
+      prompt: "If verifier reported blockers, apply the smallest safe fixes only for critical/high issues and rerun targeted checks. If PASS, make no-op and report unchanged.\n\n$INPUT"
+    - agent: autopilot-verifier
+      prompt: "Final gate check after fix loop. Confirm blockers resolved or explicitly deferred with rationale.\n\n$INPUT"
+    - agent: autopilot-pr-composer
+      prompt: "Create or update PR with body-file hygiene, concise verification evidence, and residual risk section.\n\nOriginal objective: $ORIGINAL\n\nCurrent state: $INPUT"
+
 groom-v1:
   description: "Pi-native grooming flow: strategy + research + critique + synthesis"
   checkpoints:

@@ -1,60 +1,48 @@
-# Autopilot Pipeline (v1, bounded)
+# Autopilot Pipelines (v1 + v2)
 
 ## Objective
 
-Ship one issue from intake to merge readiness with explicit human checkpoints and bounded automation loops.
+Ship one issue from intake to merge readiness with explicit checkpoints, bounded loops, and clear escalation paths.
 
-## Phase map
+## Pipeline routing
 
-1. **Issue intake (cheap model, scout/planner)**
-   - Select highest-priority issue.
-   - Produce acceptance criteria + constraints packet.
-   - **Checkpoint:** human GO before implementation.
+- `autopilot-v1` (existing): general bounded issue-to-PR flow using core agents.
+- `autopilot-issue-v2` (new): distinct phase agents/models with a built-in verifier fix loop before PR composition.
 
-2. **Implementation (workhorse model, worker)**
-   - Execute spec with focused scope.
-   - Run verification.
+Use v2 when you want stronger phase separation and deterministic handoffs.
 
-3. **Blocking review (reviewer council, bounded)**
-   - Correctness pass
-   - Safety/risk pass
-   - Test adequacy pass
-   - Consolidate must-fix findings.
+## v2 phase map (`autopilot-issue-v2`)
 
-4. **PR prep (cheap/workhorse model)**
-   - Title/body via `--body-file` path.
-   - `Closes #N`, verification summary, residual risk.
-   - `/pr-lint` pass.
-   - **Checkpoint:** human GO before publishing/finalizing PR state.
+1. **Intake (autopilot-intake / gemini flash)**
+   - Select one issue and produce intake packet.
+2. **Spec contract (autopilot-spec / claude sonnet)**
+   - Convert intake into scoped acceptance/test/rollback contract.
+3. **Design critic (autopilot-design-critic / gemini pro)**
+   - Pressure-test sequencing and hidden coupling.
+   - **Checkpoint:** after-intake-spec / before-build.
+4. **Implementation pass (autopilot-implementer / gpt-5.3-codex)**
+   - Execute minimal diffs and run relevant checks.
+5. **Verifier gate (autopilot-verifier / claude sonnet)**
+   - Severity-classified PASS/FAIL.
+6. **Fix loop (bounded, one built-in iteration)**
+   - implementer fixes critical/high blockers only.
+   - verifier re-checks final gate.
+7. **PR composition (autopilot-pr-composer / gpt-5.3-codex)**
+   - Create/update PR via `--body-file`, verify formatting, include concise evidence.
+   - **Checkpoint:** before-pr.
+8. **Merge gate (human authorization)**
+   - **Checkpoint:** before-merge.
 
-5. **CI + review response loop (bounded)**
-   - Address CI failures and meaningful review comments.
-   - Stop when required checks are green and blocking findings resolved.
-   - Hard cap retries; escalate when exceeded.
+## Circuit breakers (applies to v1 and v2)
 
-6. **Polish (conditional, not always-on)**
-   - Refactor/docs/quality-gate improvements when low-risk and high-value.
-   - Re-run required checks after any polish changes.
+- max fix/review loops
+- max wall-clock budget
+- max token/cost budget
+- auto-escalate to human when breaker trips
 
-7. **Merge gate**
-   - Fresh required checks green after final commit.
-   - No unresolved critical/high findings unless explicitly deferred with rationale + follow-up issue.
-   - `/squash-merge` path only.
-   - **Checkpoint:** explicit human authorization before merge.
+## Why v2 is a skeleton
 
-8. **Reflection + codification gate (new)**
-   - Run a post-run reflection with a high-intelligence model.
-   - Capture what changed, what was learned, and what should be codified.
-   - Propose updates to backlog, repo-local `.pi`, and global `pi-agent-config`.
-   - Required before starting the next autonomous run in flywheel mode.
-
-## Circuit breakers
-
-- Max CI/review fix loops per PR
-- Max wall-clock budget
-- Max token/cost budget
-- Auto-escalate to human when any breaker trips
-
-## Why this is v1
-
-This keeps the strategic shape (specialization + phased orchestration) while limiting complexity and runaway cost.
+`autopilot-issue-v2` is intentionally minimal and reversible:
+- codifies phase boundaries now
+- keeps loops bounded
+- allows model/agent tuning without rewriting the flow
