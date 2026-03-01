@@ -67,8 +67,11 @@ Per run, artifacts are written to `logs/soak/<timestamp>/`:
 ## Triage flow
 
 1. Check `soak-report.md` recommendations.
+   - analyzer now ingests rotated admission logs (`orchestration-admission.ndjson*`) and reports both aggregate and workload-normalized denial ratios.
 2. If denial ratios are high outside critical pressure:
-   - tune `PI_ORCH_ADM_MAX_RUNS` / `PI_ORCH_ADM_MAX_SLOTS`.
+   - first confirm they are not probe-inflated (`depth_probe`, `gap_probe`, burst over-ask).
+   - only tune `PI_ORCH_ADM_MAX_RUNS` when `RUN_CAP_REACHED` denials appear.
+   - tune `PI_ORCH_ADM_MAX_SLOTS` only if non-burst lanes show starvation.
 3. If gap trips are frequent:
    - inspect `counter_call` vs `counter_result` drift,
    - tune `PI_ORCH_ADM_GAP_MAX` / `PI_ORCH_ADM_GAP_RESET_QUIET_MS`.

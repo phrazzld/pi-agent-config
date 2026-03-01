@@ -238,6 +238,45 @@ describe("orchestration admission controller", () => {
     }
   });
 
+
+  test("gap breaker rejection reports trigger gap consistently during cooldown", async () => {
+    const h = createHarness({ gapMax: 1, cooldownMs: 2_000 });
+    try {
+      await h.controller.recordToolCall("team_run");
+      await h.controller.recordToolCall("team_run");
+
+      const firstDenied = await h.controller.preflightRun({
+        runId: "gap-trigger",
+        kind: "team_run",
+        depth: 0,
+        requestedParallelism: 1,
+      });
+      expect(firstDenied.ok).toBe(false);
+      if (firstDenied.ok) {
+        return;
+      }
+      expect(firstDenied.code).toBe("CIRCUIT_OPEN_CALL_RESULT_GAP");
+      expect(firstDenied.reason).toContain("(2 > 1)");
+
+      await h.controller.recordToolResult("team_run");
+      await h.controller.recordToolResult("team_run");
+
+      const stillDenied = await h.controller.preflightRun({
+        runId: "gap-still-open",
+        kind: "team_run",
+        depth: 0,
+        requestedParallelism: 1,
+      });
+      expect(stillDenied.ok).toBe(false);
+      if (!stillDenied.ok) {
+        expect(stillDenied.code).toBe("CIRCUIT_OPEN_CALL_RESULT_GAP");
+        expect(stillDenied.reason).toContain("(2 > 1)");
+      }
+    } finally {
+      h.cleanup();
+    }
+  });
+
   test("opens breaker when call-result gap exceeds threshold", async () => {
     const h = createHarness({ gapMax: 2, cooldownMs: 1_000 });
     try {

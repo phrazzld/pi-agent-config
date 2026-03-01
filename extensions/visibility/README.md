@@ -25,6 +25,7 @@ Maximum-visibility runtime instrumentation for onboarding and workflow tuning.
 
 - Skill usage is inferred when `read` targets a `*/SKILL.md` path.
 - This extension is intentionally verbose and intended for onboarding / meta optimization sessions.
+- Nested orchestration sessions (`PI_ORCH_DEPTH>0`) disable visibility telemetry by default.
 
 
 ## Environment
@@ -32,3 +33,4 @@ Maximum-visibility runtime instrumentation for onboarding and workflow tuning.
 - `PI_VISIBILITY_LOG_MAX_BYTES` (default `10485760`)
 - `PI_VISIBILITY_LOG_MAX_BACKUPS` (default `5`)
 - `PI_VISIBILITY_LOG_ROTATE_CHECK_MS` (default `30000`)
+- `PI_VISIBILITY_ENABLE_NESTED` (default `false`)

@@ -26,6 +26,7 @@ Loaded globally from `~/.pi/agent/AGENTS.md` for every Pi session.
 - Use role + objective + latitude framing; avoid brittle step-by-step micromanagement.
 - Require clear output contracts: evidence, decisions, residual risks, and verification commands.
 - Keep context high-signal and minimal; avoid noisy dumps.
+- If an assistant message exceeds 1000 characters, append a final `TLDR:` section summarizing the result in 1–3 bullets.
 
 ## Reliability posture
 

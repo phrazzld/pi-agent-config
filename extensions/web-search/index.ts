@@ -26,6 +26,11 @@ import {
   isTimeSensitiveQuery,
   normalizeQuery,
 } from "../../skills/web-search/query-utils";
+import { currentOrchestrationDepth, isTopLevelTelemetryEnabled } from "../shared/depth-telemetry";
+import {
+  ENABLE_NESTED_WEB_SEARCH_WARN_ENV,
+  resolveWebSearchLogPath,
+} from "./telemetry";
 
 const MODE = StringEnum(["web", "web-deep", "web-news", "web-docs"] as const);
 const MAX_LIMIT = 10;
@@ -70,6 +75,12 @@ export default function webSearchExtension(pi: ExtensionAPI): void {
   registerSearchCommand(pi, "web-docs", "Run docs/library-biased retrieval");
 
   pi.on("session_start", async (_event, ctx) => {
+    const depth = currentOrchestrationDepth(process.env);
+    const allowNestedWarn = isTopLevelTelemetryEnabled(ENABLE_NESTED_WEB_SEARCH_WARN_ENV, process.env);
+    if (depth > 0 && !allowNestedWarn) {
+      return;
+    }
+
     const hasProvider = Boolean(
       process.env.CONTEXT7_API_KEY || process.env.EXA_API_KEY || process.env.BRAVE_API_KEY
     );
@@ -90,9 +101,12 @@ async function runSearchPipeline(request: SearchRequest): Promise<SearchResponse
   });
 
   const providers = buildProviderChain(request);
+  const depth = currentOrchestrationDepth(process.env);
+  const logPath = resolveWebSearchLogPath(configDir, depth, process.env);
+
   const orchestrator = new WebSearchOrchestrator(providers, {
     cache,
-    logPath: path.join(configDir, "logs", "web-search.ndjson"),
+    logPath,
   });
 
   const { results, meta } = await orchestrator.searchWithMeta(request);

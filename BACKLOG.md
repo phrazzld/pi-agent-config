@@ -34,7 +34,7 @@ Build a world-class, explicit Pi configuration system with:
 
 ### Still Open
 
-- [ ] Soak-test admission controller and tune rejection thresholds from real telemetry.
+- [x] Soak-test admission controller and tune rejection thresholds from real telemetry.
 - [ ] Add orchestration idempotency/dedup guard for repeated identical requests.
 - [ ] Tighten governor defaults (`enforce` where justified) with lower-latency checks for runaway detection.
 - [ ] Add weekly telemetry rollup/aggregation over bounded NDJSON logs.
@@ -55,11 +55,11 @@ Build a world-class, explicit Pi configuration system with:
 
 - [x] Complete execution-engine unification by extracting shared `extensions/shared/delegation-runner.ts` across subagent/orchestration/bootstrap (common spawn lifecycle + health envelope).
 - [x] Add delegated-run recovery policy hooks (retry-once/quorum/degraded completion) on top of shared delegation-runner.
-- [ ] Run 24h mixed-workload soak with admission state + breaker telemetry review.
+- [x] Run 24h mixed-workload soak with admission state + breaker telemetry review.
 - [x] Ship repeatable soak tooling (`scripts/soak/*`, analyzer, playbook) and validate via smoke run.
 - [x] Add idempotency key + dedup in orchestration admission path.
-- [ ] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.
-- [ ] Add top-level-only telemetry mode for heavy extensions during delegated depth (`PI_ORCH_DEPTH > 0`).
+- [x] Add CI stress scenario for recursive `team_run`/`pipeline_run` fan-out beyond unit harness.
+- [x] Add top-level-only telemetry mode for heavy extensions during delegated depth (`PI_ORCH_DEPTH > 0`).
 - [x] Tighten bootstrap ambition checkpoint scoring and add consensus-quality validation on generated artifacts.
 - [x] Ship hardening visibility baseline: runtime topology docs, generated inventory, `/visibility config`, and refactor-loop codification.
 
@@ -80,6 +80,15 @@ Build a world-class, explicit Pi configuration system with:
 ## Bootstrap Flow Improvements
 
 - [ ] **Consolidate persona into AGENTS.md**: Current bootstrap creates separate `.pi/persona.md` file. Should instead embed persona identity + operational rules directly into unified `AGENTS.md` at repo root. Persona belongs front-and-center, not hidden in dot-directory. See scry repo discussion 2026-02-27.
+
+## External Capability Intake (agent-stuff scan 2026-02-27)
+
+- [ ] **Adopt** `frontend-design` skill into `skills/design-taste-frontend/SKILL.md` (port + align with repo conventions).
+- [ ] **Adopt (optional theme)** `nightowl` theme under `themes/` and evaluate a `rose-pine` sibling for final default recommendation.
+- [ ] **Pilot** `session-breakdown` extension in `meta`/`daybook` slices only (non-default baseline) and collect usability + perf feedback.
+- [ ] **Borrow patterns** from `context.ts` into existing `visibility` extension (`/visibility context` / context-window + loaded-context signals) instead of adding a duplicate extension.
+- [ ] **Design optional pack** for `review` + `todos` + `prompt-editor` + `whimsical` (explicitly non-baseline) with command namespacing and safety policy.
+- [ ] **Gate before adoption**: command-collision audit (`/review`, `/mode`, `/context`) + branch mutation guardrails + todo lock/GC stress tests.
 
 ## Platform Direction — Opinionated Pi Framework (proposal)
 
