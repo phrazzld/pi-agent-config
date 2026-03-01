@@ -116,6 +116,7 @@ interface CircuitState {
   status: "closed" | "open";
   reason: CircuitReason | null;
   details: string;
+  triggerGap: number | null;
   openedAt: number;
   cooldownUntil: number;
   trips: number;
@@ -174,9 +175,9 @@ function defaultPolicy(): AdmissionPolicy {
     slotLeaseTtlMs: envInt("PI_ORCH_ADM_SLOT_TTL_MS", 10 * 60 * 1000, 10_000, 6 * 60 * 60 * 1000),
     lockWaitMs: envInt("PI_ORCH_ADM_LOCK_WAIT_MS", 2_500, 200, 60_000),
     lockStaleMs: envInt("PI_ORCH_ADM_LOCK_STALE_MS", 10_000, 1_000, 120_000),
-    breakerCooldownMs: envInt("PI_ORCH_ADM_BREAKER_COOLDOWN_MS", 120_000, 5_000, 12 * 60 * 60 * 1000),
+    breakerCooldownMs: envInt("PI_ORCH_ADM_BREAKER_COOLDOWN_MS", 30_000, 5_000, 12 * 60 * 60 * 1000),
     maxCallResultGap: envInt("PI_ORCH_ADM_GAP_MAX", 24, 1, 10_000),
-    gapResetQuietMs: envInt("PI_ORCH_ADM_GAP_RESET_QUIET_MS", 180_000, 5_000, 12 * 60 * 60 * 1000),
+    gapResetQuietMs: envInt("PI_ORCH_ADM_GAP_RESET_QUIET_MS", 45_000, 5_000, 12 * 60 * 60 * 1000),
     eventLogMaxBytes: envInt("PI_ORCH_ADM_EVENT_LOG_MAX_BYTES", 10 * 1024 * 1024, 128 * 1024, 512 * 1024 * 1024),
     eventLogMaxBackups: envInt("PI_ORCH_ADM_EVENT_LOG_MAX_BACKUPS", 5, 1, 20),
     eventLogRotateCheckMs: envInt("PI_ORCH_ADM_EVENT_LOG_ROTATE_CHECK_MS", 15_000, 1_000, 10 * 60 * 1000),
@@ -198,6 +199,7 @@ function initialState(now: number): AdmissionState {
       status: "closed",
       reason: null,
       details: "",
+      triggerGap: null,
       openedAt: 0,
       cooldownUntil: 0,
       trips: 0,
@@ -222,6 +224,9 @@ function parseState(raw: string, now: number): AdmissionState {
         status: parsed.circuit?.status === "open" ? "open" : "closed",
         reason: parsed.circuit?.reason ?? null,
         details: parsed.circuit?.details ?? "",
+        triggerGap: Number.isFinite(parsed.circuit?.triggerGap)
+          ? Math.max(0, Math.floor(parsed.circuit?.triggerGap ?? 0))
+          : null,
         openedAt: Number(parsed.circuit?.openedAt ?? 0),
         cooldownUntil: Number(parsed.circuit?.cooldownUntil ?? 0),
         trips: Number(parsed.circuit?.trips ?? 0),
@@ -829,10 +834,12 @@ export class OrchestrationAdmissionController {
     if (state.circuit.status === "open") {
       const retryAfterMs = Math.max(0, state.circuit.cooldownUntil - now);
       if (state.circuit.reason === "call_result_gap") {
+        const triggerGap = state.circuit.triggerGap ?? maxCounterGap(state.counters);
         return this.reject(
           "CIRCUIT_OPEN_CALL_RESULT_GAP",
-          `orchestration circuit open due to tool call/result gap (${maxCounterGap(state.counters)} > ${this.policy.maxCallResultGap})`,
+          `orchestration circuit open due to tool call/result gap (${triggerGap} > ${this.policy.maxCallResultGap})`,
           {
+            triggerGap,
             maxGap: maxCounterGap(state.counters),
             maxCallResultGap: this.policy.maxCallResultGap,
             cooldownUntil: state.circuit.cooldownUntil,
@@ -886,6 +893,7 @@ export class OrchestrationAdmissionController {
         now,
         "call_result_gap",
         `gap=${gap} threshold=${this.policy.maxCallResultGap}`,
+        gap,
       );
     }
   }
@@ -900,6 +908,7 @@ export class OrchestrationAdmissionController {
     state.circuit.status = "closed";
     state.circuit.reason = null;
     state.circuit.details = "";
+    state.circuit.triggerGap = null;
     state.circuit.openedAt = 0;
     state.circuit.cooldownUntil = 0;
   }
@@ -909,11 +918,13 @@ export class OrchestrationAdmissionController {
     now: number,
     reason: CircuitReason,
     details: string,
+    triggerGap: number | null = null,
   ): void {
     const alreadyOpen = state.circuit.status === "open";
     state.circuit.status = "open";
     state.circuit.reason = reason;
     state.circuit.details = details;
+    state.circuit.triggerGap = triggerGap;
     state.circuit.openedAt = now;
     state.circuit.cooldownUntil = now + this.policy.breakerCooldownMs;
     if (!alreadyOpen) {

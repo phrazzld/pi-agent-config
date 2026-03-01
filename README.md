@@ -234,9 +234,9 @@ Optional orchestration admission knobs:
 - `PI_ORCH_ADM_MAX_RUNS` (default: `6`)
 - `PI_ORCH_ADM_MAX_SLOTS` (default: `16`)
 - `PI_ORCH_ADM_MAX_DEPTH` (default: `2`)
-- `PI_ORCH_ADM_BREAKER_COOLDOWN_MS` (default: `120000`)
+- `PI_ORCH_ADM_BREAKER_COOLDOWN_MS` (default: `30000`)
 - `PI_ORCH_ADM_GAP_MAX` (default: `24`)
-- `PI_ORCH_ADM_GAP_RESET_QUIET_MS` (default: `180000`)
+- `PI_ORCH_ADM_GAP_RESET_QUIET_MS` (default: `45000`)
 - `PI_ORCH_ADM_RUN_TTL_MS` (default: `1800000`)
 - `PI_ORCH_ADM_SLOT_TTL_MS` (default: `600000`)
 - `PI_ORCH_ADM_STATE_PATH` (default: `~/.pi/agent/state/orchestration-admission-state.json`)
@@ -259,7 +259,7 @@ Optional watchdog/handoff log knobs:
 
 Optional delegated-run health knobs (stall-aware polling):
 - `PI_DELEGATED_HEALTH_POLL_MS` (default: `5000`)
-- `PI_DELEGATED_HEALTH_WARN_NO_PROGRESS_MS` (default: `120000`)
+- `PI_DELEGATED_HEALTH_WARN_NO_PROGRESS_MS` (default: `30000`)
 - `PI_DELEGATED_HEALTH_ABORT_NO_PROGRESS_MS` (default: `900000`)
 - `PI_DELEGATED_HEALTH_ABORT_QUICK_TOOL_MS` (default: `300000`)
 - `PI_DELEGATED_HEALTH_ABORT_ACTIVE_TOOL_MS` (default: `1800000`)
